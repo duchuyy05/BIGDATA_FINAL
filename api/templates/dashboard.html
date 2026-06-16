@@ -1,550 +1,1730 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>ICU Real-time Monitoring</title>
+    <title>ICU Patient Watch</title>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
+        :root {
+            --bg: #edf4f5;
+            --panel: #ffffff;
+            --panel-soft: #f8fbfc;
+            --text: #14212b;
+            --muted: #5e6d78;
+            --line: #dce7ea;
+            --teal: #0f766e;
+            --cyan: #0ea5b7;
+            --amber: #c47f10;
+            --red: #c2414b;
+            --green: #15803d;
+            --indigo: #4f46e5;
+            --shadow: 0 18px 45px rgba(20, 33, 43, 0.09);
+        }
+
         * {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
         }
 
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        body {
             min-height: 100vh;
-            padding: 20px;
+            font-family: "Segoe UI", Arial, sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at 11% 12%, rgba(14, 165, 183, 0.18), transparent 28%),
+                linear-gradient(135deg, rgba(15, 118, 110, 0.12), transparent 36%),
+                var(--bg);
         }
 
-        h1 { 
-            text-align: center;
-            color: white;
-            font-size: 2.5em;
-            margin-bottom: 30px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
-            animation: fadeInDown 0.8s ease;
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(20, 33, 43, 0.045) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(20, 33, 43, 0.045) 1px, transparent 1px);
+            background-size: 34px 34px;
+            mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.65), transparent 72%);
         }
 
-        @keyframes fadeInDown {
-            from {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .container { 
-            max-width: 1400px;
-            margin: 0 auto;
-            display: flex;
-            flex-direction: column;
-            gap: 25px;
-        }
-
-        .patient-info { 
-            background: linear-gradient(145deg, #ffffff, #f0f9ff);
-            padding: 25px;
-            border-radius: 20px;
-            text-align: center;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-            border: 2px solid rgba(102, 126, 234, 0.2);
-            animation: fadeIn 1s ease;
-            transition: all 0.3s ease;
-        }
-
-        .patient-info:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.3);
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        .patient-info span {
-            font-weight: bold;
-            color: #667eea;
-            font-size: 1.1em;
-        }
-
-        .controls { 
-            background: white;
-            padding: 20px;
-            border-radius: 15px;
-            text-align: center;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
-            animation: slideUp 0.8s ease;
-            transition: all 0.3s ease;
-        }
-
-        .controls:hover {
-            box-shadow: 0 12px 35px rgba(102, 126, 234, 0.2);
-        }
-
-        @keyframes slideUp {
-            from {
-                opacity: 0;
-                transform: translateY(30px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .controls label {
-            font-weight: 600;
-            color: #333;
-            font-size: 1.05em;
-        }
-
+        button,
+        input,
         select {
-            padding: 12px 20px;
-            margin: 0 15px;
-            border: 2px solid #e0e7ff;
-            border-radius: 10px;
-            font-size: 1em;
-            background: white;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            outline: none;
-        }
-
-        select:hover {
-            border-color: #667eea;
-            background: #f0f9ff;
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
-        }
-
-        select:focus {
-            border-color: #667eea;
-            background: #f0f9ff;
+            font: inherit;
         }
 
         button {
-            padding: 12px 35px;
-            margin: 0 10px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 1em;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            border: 0;
+        }
+
+        .app-shell {
             position: relative;
+            max-width: 1480px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: stretch;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-width: 0;
+        }
+
+        .brand-mark {
+            display: grid;
+            place-items: center;
+            width: 56px;
+            height: 56px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--teal), var(--cyan));
+            color: white;
+            font-weight: 800;
+            letter-spacing: 0;
+            box-shadow: var(--shadow);
+        }
+
+        .eyebrow {
+            color: var(--teal);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            margin-top: 3px;
+            font-size: clamp(1.7rem, 3vw, 2.7rem);
+            line-height: 1.05;
+            letter-spacing: 0;
+        }
+
+        .patient-strip {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(92px, auto));
+            gap: 8px;
+            align-content: center;
+            min-width: min(520px, 100%);
+        }
+
+        .metric {
+            min-height: 56px;
+            padding: 10px 12px;
+            border: 1px solid rgba(220, 231, 234, 0.9);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.82);
+            box-shadow: 0 10px 28px rgba(20, 33, 43, 0.06);
+        }
+
+        .metric span {
+            display: block;
+            color: var(--muted);
+            font-size: 0.73rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .metric strong {
+            display: block;
+            margin-top: 4px;
             overflow: hidden;
+            color: var(--text);
+            font-size: 1.02rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
-        button:before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 0;
-            height: 0;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.3);
-            transform: translate(-50%, -50%);
-            transition: width 0.6s, height 0.6s;
+        .metric.status-normal strong {
+            color: var(--green);
         }
 
-        button:hover:before {
-            width: 300px;
-            height: 300px;
+        .metric.status-warning strong {
+            color: var(--amber);
         }
 
-        button:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+        .metric.status-confirmed strong {
+            color: var(--red);
         }
 
-        button:active {
+        .controls {
+            display: grid;
+            grid-template-columns: minmax(220px, 1fr) auto minmax(170px, auto) auto;
+            gap: 10px;
+            align-items: end;
+            margin-bottom: 18px;
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: var(--shadow);
+        }
+
+        .field {
+            display: grid;
+            gap: 6px;
+        }
+
+        .field label {
+            color: var(--muted);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        input,
+        select {
+            width: 100%;
+            min-height: 42px;
+            padding: 0 12px;
+            border: 1px solid #c8d8dc;
+            border-radius: 8px;
+            background: white;
+            color: var(--text);
+            outline: none;
+        }
+
+        input:focus,
+        select:focus {
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 3px rgba(14, 165, 183, 0.16);
+        }
+
+        .action-button {
+            min-height: 42px;
+            padding: 0 18px;
+            border-radius: 8px;
+            background: var(--teal);
+            color: white;
+            cursor: pointer;
+            font-weight: 800;
+            transition: transform 0.18s ease, background 0.18s ease;
+        }
+
+        .action-button:hover {
+            background: #115e59;
             transform: translateY(-1px);
         }
 
-        .chart-container {
-            background: white;
-            border-radius: 20px;
-            padding: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-            transition: all 0.4s ease;
-            animation: scaleIn 0.6s ease;
-            border: 2px solid rgba(102, 126, 234, 0.1);
+        .action-button.secondary {
+            background: var(--indigo);
         }
 
-        @keyframes scaleIn {
-            from {
-                opacity: 0;
-                transform: scale(0.95);
-            }
-            to {
-                opacity: 1;
-                transform: scale(1);
-            }
+        .action-button.secondary:hover {
+            background: #4338ca;
         }
 
-        .chart-container:hover {
-            transform: translateY(-8px);
-            box-shadow: 0 15px 45px rgba(102, 126, 234, 0.25);
-            border-color: rgba(102, 126, 234, 0.3);
+        .demo-patient-strip {
+            display: grid;
+            grid-template-columns: minmax(190px, auto) minmax(0, 1fr);
+            gap: 14px;
+            align-items: center;
+            margin-bottom: 18px;
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: var(--shadow);
         }
 
-        #vitalsChart, #labChart, #sepsisChart {
-            border-radius: 15px;
+        .demo-patient-title {
+            display: grid;
+            gap: 5px;
+        }
+
+        .demo-patient-title span {
+            color: var(--muted);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .demo-patient-title strong {
+            color: var(--text);
+            font-size: 1rem;
+        }
+
+        .patient-chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .patient-chip {
+            min-height: 34px;
+            padding: 0 12px;
+            border: 1px solid #c8d8dc;
+            border-radius: 999px;
+            background: #ffffff;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 0.86rem;
+            font-weight: 800;
+            transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+        }
+
+        .patient-chip:hover,
+        .patient-chip.active {
+            border-color: var(--teal);
+            background: #e1f3f2;
+            color: var(--teal);
+        }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+            gap: 18px;
+            align-items: start;
+        }
+
+        .chart-menu {
+            display: grid;
+            gap: 10px;
+        }
+
+        .chart-card {
+            display: grid;
+            grid-template-columns: 42px minmax(0, 1fr);
+            gap: 12px;
+            width: 100%;
+            min-height: 92px;
+            padding: 13px;
+            border: 1px solid var(--line);
+            border-left: 4px solid transparent;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.88);
+            color: var(--text);
+            cursor: pointer;
+            text-align: left;
+            box-shadow: 0 10px 26px rgba(20, 33, 43, 0.05);
+            transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .chart-card:hover {
+            border-left-color: var(--cyan);
+            box-shadow: 0 16px 34px rgba(20, 33, 43, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .chart-card.active {
+            border-color: rgba(15, 118, 110, 0.45);
+            border-left-color: var(--teal);
+            background: #f2fbfa;
+        }
+
+        .card-index {
+            display: grid;
+            place-items: center;
+            width: 42px;
+            height: 42px;
+            border-radius: 8px;
+            background: #e1f3f2;
+            color: var(--teal);
+            font-weight: 900;
+        }
+
+        .chart-card h3 {
+            margin-bottom: 5px;
+            overflow-wrap: anywhere;
+            font-size: 0.98rem;
+            line-height: 1.22;
+        }
+
+        .chart-card p {
+            color: var(--muted);
+            font-size: 0.82rem;
+            line-height: 1.35;
+        }
+
+        .chart-role,
+        .role-badge {
+            display: inline-flex;
+            align-items: center;
+            width: fit-content;
+            min-height: 24px;
+            margin-bottom: 7px;
+            padding: 0 8px;
+            border-radius: 999px;
+            font-size: 0.68rem;
+            font-weight: 900;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .chart-role.input,
+        .role-badge.input {
+            background: #e1f3f2;
+            color: var(--teal);
+        }
+
+        .chart-role.prediction,
+        .role-badge.prediction {
+            background: #fee2e2;
+            color: var(--red);
+        }
+
+        .chart-stage {
             overflow: hidden;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+            box-shadow: var(--shadow);
         }
 
-        /* Pulse animation cho status indicator */
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
+        .stage-header {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: center;
+            padding: 16px 18px 12px;
+            border-bottom: 1px solid var(--line);
+            background: linear-gradient(180deg, #ffffff, var(--panel-soft));
+        }
+
+        .stage-title p {
+            color: var(--teal);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+
+        .title-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .title-row .role-badge {
+            margin-bottom: 0;
+        }
+
+        .stage-title h2 {
+            margin-top: 4px;
+            font-size: clamp(1.25rem, 2vw, 1.85rem);
+            line-height: 1.15;
+            letter-spacing: 0;
+        }
+
+        .stage-meta {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .stage-tools {
+            display: grid;
+            gap: 10px;
+            justify-items: end;
+            min-width: min(360px, 100%);
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 0 10px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: white;
+            color: var(--muted);
+            font-size: 0.82rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .metric-search {
+            width: 100%;
+            max-width: 360px;
+        }
+
+        .metric-search label {
+            display: block;
+            margin-bottom: 5px;
+            color: var(--muted);
+            font-size: 0.73rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .search-box {
+            position: relative;
+        }
+
+        .search-box input {
+            padding-left: 38px;
+        }
+
+        .search-icon {
+            position: absolute;
+            top: 50%;
+            left: 14px;
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--teal);
+            border-radius: 50%;
+            transform: translateY(-55%);
+            pointer-events: none;
+        }
+
+        .search-icon::after {
+            content: "";
+            position: absolute;
+            right: -7px;
+            bottom: -5px;
+            width: 8px;
+            height: 2px;
+            border-radius: 999px;
+            background: var(--teal);
+            transform: rotate(45deg);
+        }
+
+        .chart-body {
+            position: relative;
+            min-height: 470px;
+        }
+
+        #activeChart {
+            height: min(61vh, 620px);
+            min-height: 470px;
+        }
+
+        .metric-info {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            z-index: 5;
+            width: min(320px, calc(100% - 28px));
+            padding: 14px;
+            border: 1px solid rgba(15, 118, 110, 0.24);
+            border-left: 4px solid var(--teal);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.94);
+            box-shadow: 0 18px 42px rgba(20, 33, 43, 0.16);
+            backdrop-filter: blur(8px);
+        }
+
+        .metric-info.hidden {
+            display: none;
+        }
+
+        .metric-info p:first-child {
+            color: var(--teal);
+            font-size: 0.72rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .metric-info h3 {
+            margin-top: 5px;
+            color: var(--text);
+            font-size: 1rem;
+            line-height: 1.25;
+        }
+
+        .metric-info dl {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin: 10px 0;
+        }
+
+        .metric-info dt {
+            color: var(--muted);
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .metric-info dd {
+            margin-top: 3px;
+            color: var(--text);
+            font-size: 0.84rem;
+            font-weight: 700;
+        }
+
+        .metric-info .metric-description {
+            color: var(--muted);
+            font-size: 0.86rem;
+            line-height: 1.45;
+        }
+
+        .metric-info .language-label {
+            margin-top: 10px;
+            color: var(--teal);
+            font-size: 0.68rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .metric-info .metric-description.vi {
+            color: #334155;
+        }
+
+        .empty-state {
+            display: none;
+            padding: 48px 20px;
+            color: var(--muted);
+            text-align: center;
+        }
+
+        .empty-state.visible {
+            display: block;
+        }
+
+        @media (max-width: 1040px) {
+            .topbar {
+                display: grid;
             }
-            50% {
-                opacity: 0.7;
+
+            .patient-strip {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                min-width: 0;
+            }
+
+            .workspace {
+                grid-template-columns: 1fr;
+            }
+
+            .chart-menu {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
             }
         }
 
-        .patient-info::before {
-            content: '●';
-            color: #10b981;
-            font-size: 1.2em;
-            margin-right: 8px;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        @media (max-width: 768px) {
-            h1 {
-                font-size: 1.8em;
+        @media (max-width: 720px) {
+            .app-shell {
+                padding: 14px;
             }
 
             .controls {
-                padding: 15px;
+                grid-template-columns: 1fr;
             }
 
-            select, button {
-                margin: 5px;
-                width: calc(100% - 10px);
+            .demo-patient-strip {
+                grid-template-columns: 1fr;
             }
-        }
 
-        * {
-            transition: all 0.3s ease;
+            .patient-chip-list {
+                justify-content: flex-start;
+            }
+
+            .chart-menu {
+                grid-template-columns: 1fr;
+            }
+
+            .stage-header {
+                grid-template-columns: 1fr;
+            }
+
+            .stage-meta {
+                justify-content: flex-start;
+            }
+
+            .stage-tools {
+                justify-items: stretch;
+            }
+
+            .chart-body {
+                min-height: 390px;
+            }
+
+            #activeChart {
+                min-height: 390px;
+            }
+
+            .metric-info {
+                position: static;
+                width: auto;
+                margin: 12px;
+            }
         }
     </style>
-    
+
     <script src="https://code.highcharts.com/highcharts.js"></script>
     <script src="https://code.highcharts.com/modules/exporting.js"></script>
 </head>
 <body>
-    <h1>🏥 ICU Real-time Monitoring</h1>
-    
-    <div class="container">
-        <div class="patient-info" id="patientInfo">
-            Patient: <span id="patientId">p000001</span> | 
-            Age: <span id="patientAge">-</span> | 
-            Gender: <span id="patientGender">-</span>
-        </div>
+    <div class="app-shell">
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-mark">ICU</div>
+                <div>
+                    <p class="eyebrow">Sepsis Monitoring</p>
+                    <h1>ICU Patient Watch</h1>
+                </div>
+            </div>
 
-        <div class="controls">
-            <label>Patient ID: 
-                <input type="text" id="patientSelect" placeholder="e.g., p000001" style="padding: 10px; border-radius: 5px; border: 1px solid #ccc; font-size: 16px; width: 150px;">
-            </label>
-            <button onclick="changePatient()">Apply</button>
+            <div class="patient-strip">
+                <div class="metric">
+                    <span>Patient</span>
+                    <strong id="patientId">{{ patient_ids[0] }}</strong>
+                </div>
+                <div class="metric">
+                    <span>Age</span>
+                    <strong id="patientAge">-</strong>
+                </div>
+                <div class="metric">
+                    <span>Gender</span>
+                    <strong id="patientGender">-</strong>
+                </div>
+                <div class="metric status-normal" id="statusMetric">
+                    <span>Status</span>
+                    <strong id="patientStatus">Normal</strong>
+                </div>
+            </div>
+        </header>
 
-            <span style="margin-left: 20px; border-left: 2px solid #ccc; padding-left: 20px;">
-                <label>Time Speed:
-                    <select id="speedSelect">
-                        <option value="1">1x (1 hr/sec)</option>
-                        <option value="2">2x (2 hr/sec)</option>
-                        <option value="5">5x (5 hr/sec)</option>
-                        <option value="10">10x (Fast)</option>
-                    </select>
-                </label>
-                <button onclick="startSimulation()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">▶ Demo Real-time</button>
-            </span>
-        </div>
-        <div class="dashboard-content">
-        <div style="display: grid; grid-template-columns: 1fr; gap: 20px;">
-            <div class="chart-container"><div id="vitalsChart" style="height: 350px;"></div></div>
-            <div class="chart-container"><div id="highScaleChart" style="height: 350px;"></div></div>
-            <div class="chart-container"><div id="mediumScaleChart" style="height: 350px;"></div></div>
-            <div class="chart-container"><div id="lowScaleVitalsChart" style="height: 350px;"></div></div>
-            <div class="chart-container"><div id="lowScaleBloodGasChart" style="height: 350px;"></div></div>
-            <div class="chart-container"><div id="lowScaleElectrolytesChart" style="height: 350px;"></div></div>
-            <div class="chart-container"><div id="sepsisChart" style="height: 400px;"></div></div>
-        </div>
+        <section class="controls">
+            <div class="field">
+                <label for="patientSelect">Patient ID</label>
+                <input type="text" id="patientSelect" value="{{ patient_ids[0] }}" placeholder="p000001">
+            </div>
+            <button class="action-button" onclick="changePatient()">Apply</button>
+            <div class="field">
+                <label for="speedSelect">Time Speed</label>
+                <select id="speedSelect">
+                    <option value="1">1x - 1 hr/sec</option>
+                    <option value="2">2x - 2 hr/sec</option>
+                    <option value="5">5x - 5 hr/sec</option>
+                    <option value="10">10x - fast</option>
+                </select>
+            </div>
+            <button class="action-button secondary" onclick="startSimulation()">Demo Real-time</button>
+        </section>
+
+        <section class="demo-patient-strip">
+            <div class="demo-patient-title">
+                <span>Active Data Mode</span>
+                <strong>{{ demo_mode }}</strong>
+            </div>
+            <div class="patient-chip-list" id="patientChips" aria-label="Demo patient IDs">
+                {% for pid in patient_ids %}
+                <button class="patient-chip{% if loop.first %} active{% endif %}" type="button" data-patient="{{ pid }}">{{ pid }}</button>
+                {% endfor %}
+            </div>
+        </section>
+
+        <main class="workspace">
+            <nav class="chart-menu" id="chartMenu" aria-label="Chart views"></nav>
+
+            <section class="chart-stage">
+                <div class="stage-header">
+                    <div class="stage-title">
+                        <div class="title-row">
+                            <p id="activeSubtitle">Vitals</p>
+                            <span id="activeRole" class="role-badge input">Input Data</span>
+                        </div>
+                        <h2 id="activeTitle">Vitals & Blood Pressure</h2>
+                    </div>
+                    <div class="stage-tools">
+                        <div class="stage-meta">
+                            <span class="pill" id="pointCount">0 records</span>
+                            <span class="pill" id="hourRange">ICU Hour -</span>
+                        </div>
+                        <div class="metric-search">
+                            <label for="metricSearch">Metric Lookup</label>
+                            <div class="search-box">
+                                <span class="search-icon" aria-hidden="true"></span>
+                                <input type="search" id="metricSearch" list="metricSuggestions" placeholder="HR, Lactate, WBC...">
+                                <datalist id="metricSuggestions"></datalist>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-body">
+                    <div id="emptyState" class="empty-state">No data available for this patient.</div>
+                    <aside id="metricInfoBox" class="metric-info hidden" aria-live="polite">
+                        <p id="metricInfoGroup">Metric Guide</p>
+                        <h3 id="metricInfoName">Select a metric</h3>
+                        <dl>
+                            <div>
+                                <dt>Unit</dt>
+                                <dd id="metricInfoUnit">-</dd>
+                            </div>
+                            <div>
+                                <dt>Chart</dt>
+                                <dd id="metricInfoChart">-</dd>
+                            </div>
+                        </dl>
+                        <p class="language-label">English</p>
+                        <p class="metric-description" id="metricInfoDescription"></p>
+                        <p class="language-label">Tiếng Việt</p>
+                        <p class="metric-description vi" id="metricInfoDescriptionVi"></p>
+                    </aside>
+                    <div id="activeChart"></div>
+                </div>
+            </section>
+        </main>
+    </div>
 
     <script>
-        let vitalsChart, highScaleChart, mediumScaleChart, lowScaleVitalsChart, lowScaleBloodGasChart, lowScaleElectrolytesChart, sepsisChart;
-        let currentPatient = '{{ patient_ids[0] }}';
+        const patientIds = {{ patient_ids|tojson }};
+        const demoMode = {{ demo_mode|tojson }};
+        let currentPatient = patientIds[0] || "p000001";
         let lastDataKey = "";
-        
-        // Biến cho Simulation
         let fullPatientData = null;
         let simulationInterval = null;
         let currentSimIndex = 0;
         let isSimulating = false;
+        let activeChart = null;
+        let activeView = "vitals";
+        let activeViewRendered = null;
+        let latestData = null;
+        let selectedMetric = null;
 
-        // Định nghĩa nhóm field
         const GROUPS = {
-            vitals: new Set(['HR', 'O2Sat', 'SBP', 'MAP', 'DBP']),
-            highScale: new Set(['Platelets', 'Fibrinogen', 'Glucose', 'Alkalinephos', 'AST']),
-            mediumScale: new Set(['Chloride', 'BUN', 'Hct', 'PaCO2', 'HCO3', 'SaO2', 'FiO2', 'PTT', 'EtCO2']),
-            lowScaleVitalsHema: new Set(['WBC', 'Hgb', 'Temp', 'Resp']),
-            lowScaleBloodGas: new Set(['Lactate', 'TroponinI', 'pH', 'BaseExcess']),
-            lowScaleElectrolytes: new Set(['Creatinine', 'Calcium', 'Potassium', 'Phosphate', 'Magnesium', 'Bilirubin_total', 'Bilirubin_direct'])
+            vitals: new Set(["HR", "O2Sat", "SBP", "MAP", "DBP"]),
+            highScale: new Set(["Platelets", "Fibrinogen", "Glucose", "Alkalinephos", "AST"]),
+            mediumScale: new Set(["Chloride", "BUN", "Hct", "PaCO2", "HCO3", "SaO2", "FiO2", "PTT", "EtCO2"]),
+            lowScaleVitalsHema: new Set(["WBC", "Hgb", "Temp", "Resp"]),
+            lowScaleBloodGas: new Set(["Lactate", "TroponinI", "pH", "BaseExcess"]),
+            lowScaleElectrolytes: new Set(["Creatinine", "Calcium", "Potassium", "Phosphate", "Magnesium", "Bilirubin_total", "Bilirubin_direct"])
         };
 
         const FIELD_NAMES = {
-            "HR": "Heart Rate (bpm)", "O2Sat": "O2 Saturation (%)", "Temp": "Temperature (°C)",
-            "SBP": "Systolic BP (mmHg)", "MAP": "Mean Arterial Pressure (mmHg)", "DBP": "Diastolic BP (mmHg)",
-            "Resp": "Respiration Rate (rpm)", "EtCO2": "End-tidal CO2 (mmHg)", "BaseExcess": "Base Excess (mEq/L)",
-            "HCO3": "Bicarbonate (mEq/L)", "FiO2": "Fraction of Inspired O2 (%)", "pH": "pH",
-            "PaCO2": "Partial Pressure of CO2 (mmHg)", "SaO2": "Oxygen Saturation (%)", "AST": "AST (IU/L)",
-            "BUN": "Blood Urea Nitrogen (mg/dL)", "Alkalinephos": "Alkaline Phosphatase (IU/L)",
-            "Calcium": "Calcium (mg/dL)", "Chloride": "Chloride (mEq/L)", "Creatinine": "Creatinine (mg/dL)",
-            "Bilirubin_direct": "Bilirubin Direct (mg/dL)", "Glucose": "Glucose (mg/dL)", "Lactate": "Lactate (mg/dL)",
-            "Magnesium": "Magnesium (mg/dL)", "Phosphate": "Phosphate (mg/dL)", "Potassium": "Potassium (mEq/L)",
-            "Bilirubin_total": "Bilirubin Total (mg/dL)", "TroponinI": "Troponin I (ng/mL)", "Hct": "Hematocrit (%)",
-            "Hgb": "Hemoglobin (g/dL)", "PTT": "Partial Thromboplastin Time (sec)", "WBC": "White Blood Cells (x10³/µL)",
-            "Fibrinogen": "Fibrinogen (mg/dL)", "Platelets": "Platelets (x10³/µL)"
+            "HR": "Heart Rate (bpm)",
+            "O2Sat": "O2 Saturation (%)",
+            "Temp": "Temperature (C)",
+            "SBP": "Systolic BP (mmHg)",
+            "MAP": "Mean Arterial Pressure (mmHg)",
+            "DBP": "Diastolic BP (mmHg)",
+            "Resp": "Respiration Rate (rpm)",
+            "EtCO2": "End-tidal CO2 (mmHg)",
+            "BaseExcess": "Base Excess (mEq/L)",
+            "HCO3": "Bicarbonate (mEq/L)",
+            "FiO2": "Fraction of Inspired O2 (%)",
+            "pH": "pH",
+            "PaCO2": "Partial Pressure of CO2 (mmHg)",
+            "SaO2": "Oxygen Saturation (%)",
+            "AST": "AST (IU/L)",
+            "BUN": "Blood Urea Nitrogen (mg/dL)",
+            "Alkalinephos": "Alkaline Phosphatase (IU/L)",
+            "Calcium": "Calcium (mg/dL)",
+            "Chloride": "Chloride (mEq/L)",
+            "Creatinine": "Creatinine (mg/dL)",
+            "Bilirubin_direct": "Bilirubin Direct (mg/dL)",
+            "Glucose": "Glucose (mg/dL)",
+            "Lactate": "Lactate (mg/dL)",
+            "Magnesium": "Magnesium (mg/dL)",
+            "Phosphate": "Phosphate (mg/dL)",
+            "Potassium": "Potassium (mEq/L)",
+            "Bilirubin_total": "Bilirubin Total (mg/dL)",
+            "TroponinI": "Troponin I (ng/mL)",
+            "Hct": "Hematocrit (%)",
+            "Hgb": "Hemoglobin (g/dL)",
+            "PTT": "Partial Thromboplastin Time (sec)",
+            "WBC": "White Blood Cells (x10^3/uL)",
+            "Fibrinogen": "Fibrinogen (mg/dL)",
+            "Platelets": "Platelets (x10^3/uL)"
         };
 
-        // Hàm fetchData() cũ đã được di chuyển xuống dưới cùng
+        const CHART_VIEWS = [
+            {
+                id: "vitals",
+                subtitle: "Vitals",
+                title: "Vitals & Blood Pressure",
+                description: "HR, O2Sat, SBP, MAP, DBP",
+                group: GROUPS.vitals,
+                color: "#0ea5b7"
+            },
+            {
+                id: "highScale",
+                subtitle: "High Scale Labs",
+                title: "High Scale Laboratory Values",
+                description: "Platelets, fibrinogen, glucose, liver enzymes",
+                group: GROUPS.highScale,
+                color: "#c47f10"
+            },
+            {
+                id: "mediumScale",
+                subtitle: "Medium Scale Labs",
+                title: "Respiratory & Chemistry Panel",
+                description: "Chloride, BUN, Hct, PaCO2, HCO3, SaO2",
+                group: GROUPS.mediumScale,
+                color: "#4f46e5"
+            },
+            {
+                id: "lowScaleVitalsHema",
+                subtitle: "Vitals & Hema",
+                title: "Temperature, Respiration & Blood Count",
+                description: "WBC, Hgb, temperature, respiration",
+                group: GROUPS.lowScaleVitalsHema,
+                color: "#15803d"
+            },
+            {
+                id: "lowScaleBloodGas",
+                subtitle: "Blood Gas",
+                title: "Blood Gas & Critical Markers",
+                description: "Lactate, troponin, pH, base excess",
+                group: GROUPS.lowScaleBloodGas,
+                color: "#c2414b"
+            },
+            {
+                id: "lowScaleElectrolytes",
+                subtitle: "Electrolytes",
+                title: "Renal, Liver & Electrolyte Panel",
+                description: "Creatinine, calcium, potassium, bilirubin",
+                group: GROUPS.lowScaleElectrolytes,
+                color: "#0f766e"
+            },
+            {
+                id: "sepsis",
+                subtitle: "Prediction",
+                title: "Sepsis Alert",
+                description: "Raw label, suspected sepsis, confirmed sepsis",
+                special: "sepsis",
+                color: "#dc2626"
+            }
+        ];
+
+        const METRIC_INFO = {
+            HR: {
+                name: FIELD_NAMES.HR,
+                unit: "bpm",
+                view: "vitals",
+                group: "Vitals",
+                description: "Heart rate shows how many times the heart beats per minute. A rising HR can reflect fever, pain, shock, stress, or infection.",
+                aliases: ["heart rate", "pulse"]
+            },
+            O2Sat: {
+                name: FIELD_NAMES.O2Sat,
+                unit: "%",
+                view: "vitals",
+                group: "Vitals",
+                description: "Oxygen saturation estimates how much oxygen is carried in the blood. Low values can suggest respiratory stress or poor oxygen delivery.",
+                aliases: ["oxygen saturation", "spo2", "o2"]
+            },
+            SBP: {
+                name: FIELD_NAMES.SBP,
+                unit: "mmHg",
+                view: "vitals",
+                group: "Blood Pressure",
+                description: "Systolic blood pressure is the pressure during heart contraction. Low SBP can be a warning sign of shock or poor circulation.",
+                aliases: ["systolic", "systolic bp"]
+            },
+            MAP: {
+                name: FIELD_NAMES.MAP,
+                unit: "mmHg",
+                view: "vitals",
+                group: "Blood Pressure",
+                description: "Mean arterial pressure reflects average blood pressure during one heartbeat. ICU teams often track it to judge organ perfusion.",
+                aliases: ["mean arterial pressure"]
+            },
+            DBP: {
+                name: FIELD_NAMES.DBP,
+                unit: "mmHg",
+                view: "vitals",
+                group: "Blood Pressure",
+                description: "Diastolic blood pressure is the pressure while the heart relaxes. It helps complete the blood pressure trend with SBP and MAP.",
+                aliases: ["diastolic", "diastolic bp"]
+            },
+            Platelets: {
+                name: FIELD_NAMES.Platelets,
+                unit: "x10^3/uL",
+                view: "highScale",
+                group: "High Scale Labs",
+                description: "Platelets support blood clotting. Very low or falling platelets can appear in severe infection, inflammation, or organ dysfunction.",
+                aliases: ["plt"]
+            },
+            Fibrinogen: {
+                name: FIELD_NAMES.Fibrinogen,
+                unit: "mg/dL",
+                view: "highScale",
+                group: "High Scale Labs",
+                description: "Fibrinogen is a clotting protein. Changes can reflect inflammation or coagulation abnormalities during critical illness.",
+                aliases: ["fib"]
+            },
+            Glucose: {
+                name: FIELD_NAMES.Glucose,
+                unit: "mg/dL",
+                view: "highScale",
+                group: "High Scale Labs",
+                description: "Glucose is blood sugar. Stress, infection, insulin therapy, and nutrition can all shift glucose levels in ICU patients.",
+                aliases: ["blood sugar"]
+            },
+            Alkalinephos: {
+                name: FIELD_NAMES.Alkalinephos,
+                unit: "IU/L",
+                view: "highScale",
+                group: "High Scale Labs",
+                description: "Alkaline phosphatase is an enzyme linked to liver and biliary function. It helps track liver-related stress or disease.",
+                aliases: ["alkaline phosphatase", "alp"]
+            },
+            AST: {
+                name: FIELD_NAMES.AST,
+                unit: "IU/L",
+                view: "highScale",
+                group: "High Scale Labs",
+                description: "AST is a liver and tissue injury enzyme. Elevated AST can reflect liver stress, muscle injury, or systemic illness.",
+                aliases: ["aspartate aminotransferase"]
+            },
+            Chloride: {
+                name: FIELD_NAMES.Chloride,
+                unit: "mEq/L",
+                view: "mediumScale",
+                group: "Chemistry",
+                description: "Chloride is an electrolyte involved in fluid and acid-base balance. Abnormal values can accompany dehydration or metabolic imbalance.",
+                aliases: ["cl"]
+            },
+            BUN: {
+                name: FIELD_NAMES.BUN,
+                unit: "mg/dL",
+                view: "mediumScale",
+                group: "Renal",
+                description: "Blood urea nitrogen reflects kidney function, hydration, and protein metabolism. Rising BUN may suggest renal stress.",
+                aliases: ["blood urea nitrogen"]
+            },
+            Hct: {
+                name: FIELD_NAMES.Hct,
+                unit: "%",
+                view: "mediumScale",
+                group: "Hematology",
+                description: "Hematocrit is the percentage of blood volume made of red blood cells. It helps assess anemia, bleeding, or fluid shifts.",
+                aliases: ["hematocrit"]
+            },
+            PaCO2: {
+                name: FIELD_NAMES.PaCO2,
+                unit: "mmHg",
+                view: "mediumScale",
+                group: "Respiratory",
+                description: "PaCO2 is arterial carbon dioxide pressure. It helps assess ventilation and acid-base status.",
+                aliases: ["carbon dioxide", "co2"]
+            },
+            HCO3: {
+                name: FIELD_NAMES.HCO3,
+                unit: "mEq/L",
+                view: "mediumScale",
+                group: "Blood Gas",
+                description: "Bicarbonate helps buffer blood acidity. Low HCO3 can appear with metabolic acidosis, including severe shock states.",
+                aliases: ["bicarbonate"]
+            },
+            SaO2: {
+                name: FIELD_NAMES.SaO2,
+                unit: "%",
+                view: "mediumScale",
+                group: "Respiratory",
+                description: "SaO2 is arterial oxygen saturation from blood gas. It complements O2Sat for oxygenation assessment.",
+                aliases: ["arterial oxygen saturation"]
+            },
+            FiO2: {
+                name: FIELD_NAMES.FiO2,
+                unit: "% on chart",
+                view: "mediumScale",
+                group: "Respiratory",
+                description: "FiO2 is the fraction of inspired oxygen delivered to the patient. The dashboard converts it to percent for readability.",
+                aliases: ["inspired oxygen", "fio2 percent"]
+            },
+            PTT: {
+                name: FIELD_NAMES.PTT,
+                unit: "sec",
+                view: "mediumScale",
+                group: "Coagulation",
+                description: "Partial thromboplastin time measures part of the clotting pathway. Prolonged PTT can indicate coagulation issues.",
+                aliases: ["partial thromboplastin time"]
+            },
+            EtCO2: {
+                name: FIELD_NAMES.EtCO2,
+                unit: "mmHg",
+                view: "mediumScale",
+                group: "Respiratory",
+                description: "End-tidal CO2 estimates exhaled carbon dioxide. It can reflect ventilation and circulation changes.",
+                aliases: ["end tidal co2"]
+            },
+            WBC: {
+                name: FIELD_NAMES.WBC,
+                unit: "x10^3/uL",
+                view: "lowScaleVitalsHema",
+                group: "Hematology",
+                description: "White blood cell count is a key infection and inflammation marker. High or low WBC can both matter in sepsis screening.",
+                aliases: ["white blood cells", "white count"]
+            },
+            Hgb: {
+                name: FIELD_NAMES.Hgb,
+                unit: "g/dL",
+                view: "lowScaleVitalsHema",
+                group: "Hematology",
+                description: "Hemoglobin carries oxygen in red blood cells. Low Hgb can reduce oxygen delivery to tissues.",
+                aliases: ["hemoglobin"]
+            },
+            Temp: {
+                name: FIELD_NAMES.Temp,
+                unit: "C",
+                view: "lowScaleVitalsHema",
+                group: "Vitals",
+                description: "Temperature tracks fever or hypothermia. Both abnormal high and low temperatures can support infection concern.",
+                aliases: ["temperature", "fever"]
+            },
+            Resp: {
+                name: FIELD_NAMES.Resp,
+                unit: "rpm",
+                view: "lowScaleVitalsHema",
+                group: "Vitals",
+                description: "Respiration rate is breaths per minute. Increased breathing rate can be an early sign of clinical deterioration.",
+                aliases: ["respiration", "respiratory rate"]
+            },
+            Lactate: {
+                name: FIELD_NAMES.Lactate,
+                unit: "mg/dL",
+                view: "lowScaleBloodGas",
+                group: "Critical Marker",
+                description: "Lactate can rise when tissues are not getting enough oxygen. It is especially important in sepsis and shock monitoring.",
+                aliases: ["lactic acid"]
+            },
+            TroponinI: {
+                name: FIELD_NAMES.TroponinI,
+                unit: "ng/mL",
+                view: "lowScaleBloodGas",
+                group: "Cardiac Marker",
+                description: "Troponin I is a cardiac injury marker. It can increase with heart strain, injury, or severe systemic illness.",
+                aliases: ["troponin", "troponin i"]
+            },
+            pH: {
+                name: FIELD_NAMES.pH,
+                unit: "pH",
+                view: "lowScaleBloodGas",
+                group: "Blood Gas",
+                description: "pH measures blood acidity. Low pH suggests acidosis, which can happen in severe shock or respiratory failure.",
+                aliases: ["blood ph"]
+            },
+            BaseExcess: {
+                name: FIELD_NAMES.BaseExcess,
+                unit: "mEq/L",
+                view: "lowScaleBloodGas",
+                group: "Blood Gas",
+                description: "Base excess reflects metabolic acid-base balance. Negative values can indicate metabolic acidosis.",
+                aliases: ["base excess"]
+            },
+            Creatinine: {
+                name: FIELD_NAMES.Creatinine,
+                unit: "mg/dL",
+                view: "lowScaleElectrolytes",
+                group: "Renal",
+                description: "Creatinine is a kidney function marker. Rising creatinine can suggest acute kidney stress or injury.",
+                aliases: ["creat"]
+            },
+            Calcium: {
+                name: FIELD_NAMES.Calcium,
+                unit: "mg/dL",
+                view: "lowScaleElectrolytes",
+                group: "Electrolytes",
+                description: "Calcium is an electrolyte important for muscle, nerve, and cardiac function.",
+                aliases: ["ca"]
+            },
+            Potassium: {
+                name: FIELD_NAMES.Potassium,
+                unit: "mEq/L",
+                view: "lowScaleElectrolytes",
+                group: "Electrolytes",
+                description: "Potassium affects heart rhythm and muscle function. Abnormal potassium can be clinically urgent.",
+                aliases: ["k"]
+            },
+            Phosphate: {
+                name: FIELD_NAMES.Phosphate,
+                unit: "mg/dL",
+                view: "lowScaleElectrolytes",
+                group: "Electrolytes",
+                description: "Phosphate supports energy metabolism and cell function. Abnormal values can appear in critical illness.",
+                aliases: ["phos"]
+            },
+            Magnesium: {
+                name: FIELD_NAMES.Magnesium,
+                unit: "mg/dL",
+                view: "lowScaleElectrolytes",
+                group: "Electrolytes",
+                description: "Magnesium supports heart rhythm, muscle, and nerve function. Low magnesium can increase arrhythmia risk.",
+                aliases: ["mg"]
+            },
+            Bilirubin_total: {
+                name: FIELD_NAMES.Bilirubin_total,
+                unit: "mg/dL",
+                view: "lowScaleElectrolytes",
+                group: "Liver",
+                description: "Total bilirubin helps assess liver and bile processing. High values can reflect liver stress or obstruction.",
+                aliases: ["total bilirubin", "bilirubin total"]
+            },
+            Bilirubin_direct: {
+                name: FIELD_NAMES.Bilirubin_direct,
+                unit: "mg/dL",
+                view: "lowScaleElectrolytes",
+                group: "Liver",
+                description: "Direct bilirubin is a liver and bile flow marker. It helps separate types of bilirubin elevation.",
+                aliases: ["direct bilirubin", "bilirubin direct"]
+            },
+            SepsisProb: {
+                name: "Sepsis Probability",
+                unit: "0 to 1",
+                view: "sepsis",
+                group: "Prediction",
+                description: "Model probability for sepsis risk at the current ICU hour. Higher values mean the model sees stronger sepsis-like patterns.",
+                aliases: ["probability", "risk", "sepsis probability"]
+            },
+            SepsisLabel: {
+                name: "Raw Model Label",
+                unit: "0 or 1",
+                view: "sepsis",
+                group: "Prediction",
+                description: "Binary model output after comparing SepsisProb with the chosen threshold. It is the raw positive/negative signal.",
+                aliases: ["raw label", "model label"]
+            },
+            SepsisWarning: {
+                name: "Suspected Sepsis",
+                unit: "0 or 1",
+                view: "sepsis",
+                group: "Alert",
+                description: "Warning state triggered when recent model outputs suggest possible sepsis. This is smoother than one raw prediction.",
+                aliases: ["warning", "suspected"]
+            },
+            SepsisConfirmed: {
+                name: "Confirmed Sepsis",
+                unit: "0 or 1",
+                view: "sepsis",
+                group: "Alert",
+                description: "Confirmed alert state after the warning persists according to the Spark state logic.",
+                aliases: ["confirmed", "alert"]
+            }
+        };
+
+        const METRIC_INFO_VI = {
+            HR: "Đường này biểu diễn nhịp tim của bệnh nhân theo từng ICU Hour. HR tăng có thể liên quan đến sốt, đau, stress, sốc hoặc nhiễm trùng.",
+            O2Sat: "Đường này biểu diễn độ bão hòa oxy trong máu theo từng ICU Hour. O2Sat giảm cho thấy bệnh nhân có thể đang thiếu oxy hoặc suy hô hấp.",
+            SBP: "Đường này biểu diễn huyết áp tâm thu theo từng ICU Hour. SBP thấp có thể là dấu hiệu tụt huyết áp, sốc hoặc tưới máu cơ quan kém.",
+            MAP: "Đường này biểu diễn huyết áp động mạch trung bình theo từng ICU Hour. MAP giúp đánh giá máu có được bơm đủ đến các cơ quan hay không.",
+            DBP: "Đường này biểu diễn huyết áp tâm trương theo từng ICU Hour. DBP giúp bổ sung bức tranh huyết áp cùng với SBP và MAP.",
+            Platelets: "Đường này biểu diễn số lượng tiểu cầu theo từng ICU Hour. Tiểu cầu giảm có thể gặp trong nhiễm trùng nặng, rối loạn đông máu hoặc suy cơ quan.",
+            Fibrinogen: "Đường này biểu diễn fibrinogen theo từng ICU Hour. Đây là protein liên quan đến đông máu và phản ứng viêm.",
+            Glucose: "Đường này biểu diễn đường huyết theo từng ICU Hour. Glucose thay đổi có thể do stress, nhiễm trùng, dinh dưỡng hoặc điều trị insulin.",
+            Alkalinephos: "Đường này biểu diễn alkaline phosphatase theo từng ICU Hour. Chỉ số này liên quan đến gan và đường mật.",
+            AST: "Đường này biểu diễn AST theo từng ICU Hour. AST tăng có thể gợi ý tổn thương gan, cơ hoặc tình trạng bệnh toàn thân nặng.",
+            Chloride: "Đường này biểu diễn chloride theo từng ICU Hour. Đây là điện giải liên quan đến cân bằng dịch và cân bằng toan kiềm.",
+            BUN: "Đường này biểu diễn blood urea nitrogen theo từng ICU Hour. BUN tăng có thể gợi ý mất nước, stress thận hoặc suy giảm chức năng thận.",
+            Hct: "Đường này biểu diễn hematocrit theo từng ICU Hour. Chỉ số này cho biết tỷ lệ hồng cầu trong máu, liên quan đến thiếu máu, mất máu hoặc thay đổi dịch.",
+            PaCO2: "Đường này biểu diễn áp lực CO2 trong máu động mạch theo từng ICU Hour. PaCO2 giúp đánh giá thông khí và rối loạn hô hấp.",
+            HCO3: "Đường này biểu diễn bicarbonate theo từng ICU Hour. HCO3 thấp có thể gợi ý toan chuyển hóa, thường gặp khi sốc hoặc bệnh nặng.",
+            SaO2: "Đường này biểu diễn độ bão hòa oxy động mạch theo từng ICU Hour. Nó giúp đánh giá oxy hóa máu cùng với O2Sat.",
+            FiO2: "Đường này biểu diễn nồng độ oxy bệnh nhân đang được cung cấp theo từng ICU Hour. Dashboard đổi FiO2 sang phần trăm để dễ nhìn hơn.",
+            PTT: "Đường này biểu diễn thời gian đông máu PTT theo từng ICU Hour. PTT kéo dài có thể gợi ý rối loạn đông máu.",
+            EtCO2: "Đường này biểu diễn CO2 cuối thì thở ra theo từng ICU Hour. EtCO2 phản ánh thông khí và phần nào tình trạng tuần hoàn.",
+            WBC: "Đường này biểu diễn số lượng bạch cầu theo từng ICU Hour. WBC tăng hoặc giảm bất thường đều có thể liên quan đến nhiễm trùng hoặc phản ứng viêm.",
+            Hgb: "Đường này biểu diễn hemoglobin theo từng ICU Hour. Hgb thấp làm giảm khả năng vận chuyển oxy của máu.",
+            Temp: "Đường này biểu diễn nhiệt độ cơ thể theo từng ICU Hour. Sốt hoặc hạ thân nhiệt đều là tín hiệu quan trọng khi theo dõi sepsis.",
+            Resp: "Đường này biểu diễn nhịp thở theo từng ICU Hour. Resp tăng có thể là dấu hiệu bệnh nhân đang khó thở hoặc tình trạng xấu đi.",
+            Lactate: "Đường này biểu diễn lactate theo từng ICU Hour. Lactate tăng là dấu hiệu rất quan trọng trong sepsis, có thể gợi ý thiếu oxy mô hoặc sốc.",
+            TroponinI: "Đường này biểu diễn troponin I theo từng ICU Hour. Chỉ số này liên quan đến tổn thương hoặc căng thẳng cơ tim.",
+            pH: "Đường này biểu diễn độ pH máu theo từng ICU Hour. pH thấp cho thấy máu bị toan, có thể gặp trong sốc hoặc suy hô hấp.",
+            BaseExcess: "Đường này biểu diễn base excess theo từng ICU Hour. Giá trị âm nhiều có thể gợi ý toan chuyển hóa.",
+            Creatinine: "Đường này biểu diễn creatinine theo từng ICU Hour. Creatinine tăng có thể gợi ý thận đang bị tổn thương hoặc hoạt động kém.",
+            Calcium: "Đường này biểu diễn calcium theo từng ICU Hour. Calcium là điện giải quan trọng cho cơ, thần kinh và tim.",
+            Potassium: "Đường này biểu diễn potassium theo từng ICU Hour. Kali bất thường có thể ảnh hưởng nguy hiểm đến nhịp tim.",
+            Phosphate: "Đường này biểu diễn phosphate theo từng ICU Hour. Phosphate liên quan đến chuyển hóa năng lượng và chức năng tế bào.",
+            Magnesium: "Đường này biểu diễn magnesium theo từng ICU Hour. Magnesium ảnh hưởng đến nhịp tim, cơ và thần kinh.",
+            Bilirubin_total: "Đường này biểu diễn bilirubin toàn phần theo từng ICU Hour. Chỉ số này giúp theo dõi chức năng gan và đường mật.",
+            Bilirubin_direct: "Đường này biểu diễn bilirubin trực tiếp theo từng ICU Hour. Nó giúp đánh giá chi tiết hơn tình trạng gan và bài tiết mật.",
+            SepsisProb: "Đường này biểu diễn xác suất sepsis do model dự đoán theo từng ICU Hour. Giá trị càng cao nghĩa là model càng thấy nhiều dấu hiệu giống sepsis.",
+            SepsisLabel: "Đường này biểu diễn kết quả 0/1 thô của model theo từng ICU Hour sau khi so sánh xác suất với ngưỡng.",
+            SepsisWarning: "Vùng này biểu diễn trạng thái nghi ngờ sepsis theo từng ICU Hour. Nó được bật khi các dự đoán gần đây cho thấy nguy cơ sepsis.",
+            SepsisConfirmed: "Vùng này biểu diễn trạng thái sepsis đã được xác nhận theo logic cảnh báo của Spark qua từng ICU Hour."
+        };
+
+        const CHART_COLORS = ["#0ea5b7", "#0f766e", "#f2c94c", "#ef6c35", "#4f7fbf", "#8b5cf6", "#22c55e", "#e11d48", "#64748b"];
+
+        Highcharts.setOptions({
+            colors: CHART_COLORS,
+            lang: {
+                thousandsSep: ","
+            }
+        });
+
+        function normalizeMetricText(value) {
+            return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        }
+
+        function viewTitle(viewId) {
+            const view = CHART_VIEWS.find(item => item.id === viewId);
+            return view ? view.title : "-";
+        }
+
+        function viewRole(view) {
+            return view && view.special === "sepsis" ? "Prediction Output" : "Input Data";
+        }
+
+        function viewRoleClass(view) {
+            return view && view.special === "sepsis" ? "prediction" : "input";
+        }
+
+        function metricSearchTerms(key, info) {
+            return [
+                key,
+                info.name,
+                info.group,
+                ...(info.aliases || [])
+            ].map(term => ({
+                raw: term,
+                normalized: normalizeMetricText(term)
+            }));
+        }
+
+        function findMetric(query) {
+            const normalizedQuery = normalizeMetricText(query);
+            if (normalizedQuery.length < 2) return null;
+
+            const entries = Object.entries(METRIC_INFO);
+            const scored = entries
+                .map(([key, info]) => {
+                    const terms = metricSearchTerms(key, info);
+                    let score = 0;
+
+                    for (const term of terms) {
+                        if (term.normalized === normalizedQuery) score = Math.max(score, 100);
+                        else if (term.normalized.startsWith(normalizedQuery)) score = Math.max(score, 70);
+                        else if (term.normalized.includes(normalizedQuery)) score = Math.max(score, 40);
+                    }
+
+                    return { key, info, score };
+                })
+                .filter(item => item.score > 0)
+                .sort((a, b) => b.score - a.score || a.info.name.localeCompare(b.info.name));
+
+            return scored.length ? scored[0] : null;
+        }
+
+        function renderMetricSuggestions() {
+            const suggestions = document.getElementById("metricSuggestions");
+            suggestions.innerHTML = Object.entries(METRIC_INFO)
+                .sort((a, b) => a[1].name.localeCompare(b[1].name))
+                .map(([key, info]) => `<option value="${key}" label="${info.name}"></option>`)
+                .join("");
+        }
+
+        function updateMetricInfoBox(match = null) {
+            const box = document.getElementById("metricInfoBox");
+            if (!match) {
+                box.classList.add("hidden");
+                return;
+            }
+
+            const info = match.info;
+            const isVisibleOnActiveChart = info.view === activeView;
+            if (!isVisibleOnActiveChart) {
+                box.classList.add("hidden");
+                return;
+            }
+
+            document.getElementById("metricInfoGroup").textContent = info.group;
+            document.getElementById("metricInfoName").textContent = info.name;
+            document.getElementById("metricInfoUnit").textContent = info.unit;
+            document.getElementById("metricInfoChart").textContent = viewTitle(info.view);
+            document.getElementById("metricInfoDescription").textContent = info.description;
+            document.getElementById("metricInfoDescriptionVi").textContent = METRIC_INFO_VI[match.key] || "";
+            box.classList.remove("hidden");
+        }
+
+        function selectMetric(key, jumpToView = true) {
+            if (!key || !METRIC_INFO[key]) {
+                selectedMetric = null;
+                updateMetricInfoBox(null);
+                if (latestData) renderCharts(latestData);
+                return;
+            }
+
+            selectedMetric = key;
+            const info = METRIC_INFO[key];
+
+            if (jumpToView && info.view !== activeView) {
+                activeView = info.view;
+                renderChartMenu();
+            }
+
+            if (latestData) {
+                renderCharts(latestData);
+            } else {
+                updateMetricInfoBox({ key, info });
+            }
+        }
+
+        function handleMetricSearch() {
+            const input = document.getElementById("metricSearch");
+            const query = input.value.trim();
+
+            if (!query) {
+                selectMetric(null);
+                return;
+            }
+
+            const match = findMetric(query);
+            if (match) {
+                selectMetric(match.key);
+            } else {
+                selectedMetric = null;
+                updateMetricInfoBox(null);
+                if (latestData) renderCharts(latestData);
+            }
+        }
+
+        function renderChartMenu() {
+            const menu = document.getElementById("chartMenu");
+            menu.innerHTML = CHART_VIEWS.map((view, index) => `
+                <button class="chart-card ${view.id === activeView ? "active" : ""}" data-view="${view.id}" style="--accent:${view.color}">
+                    <span class="card-index">${String(index + 1).padStart(2, "0")}</span>
+                    <span>
+                        <span class="chart-role ${viewRoleClass(view)}">${viewRole(view)}</span>
+                        <h3>${view.title}</h3>
+                        <p>${view.description}</p>
+                    </span>
+                </button>
+            `).join("");
+
+            menu.querySelectorAll(".chart-card").forEach(button => {
+                button.addEventListener("click", () => setActiveView(button.dataset.view));
+            });
+        }
+
+        function updatePatientChips() {
+            document.querySelectorAll(".patient-chip").forEach(button => {
+                button.classList.toggle("active", button.dataset.patient === currentPatient);
+            });
+        }
+
+        function selectDemoPatient(patientId) {
+            if (!patientId) return;
+            document.getElementById("patientSelect").value = patientId;
+            changePatient();
+        }
+
+        function setActiveView(viewId) {
+            activeView = viewId;
+            renderChartMenu();
+            if (selectedMetric && METRIC_INFO[selectedMetric].view !== activeView) {
+                selectedMetric = null;
+                document.getElementById("metricSearch").value = "";
+                updateMetricInfoBox(null);
+            }
+            if (latestData) {
+                renderCharts(latestData);
+            }
+        }
 
         async function fetchFullDataForSimulation() {
-            const res = await fetch(`/query?patient_id=${currentPatient}`);
+            const res = await fetch(`/query?patient_id=${encodeURIComponent(currentPatient)}`);
             fullPatientData = await res.json();
             return fullPatientData;
         }
 
-        // Cập nhật biểu đồ với một phần dữ liệu (từ 0 đến limitIndex)
         function renderDataSubset(data, limitIndex) {
-            // Tạo bản sao dữ liệu nhưng chỉ lấy đến limitIndex
-            const subsetData = data.map(series => {
-                return {
-                    target: series.target,
-                    datapoints: series.datapoints.slice(0, limitIndex + 1)
-                };
-            });
-            
-            // Tái sử dụng logic vẽ chart hiện có (bằng cách override data nội bộ)
-            // Cần sửa một chút để hàm render tách biệt khỏi fetch.
-            // Để đơn giản, ta sẽ gọi một hàm renderCharts(subsetData)
+            const subsetData = data.map(series => ({
+                target: series.target,
+                datapoints: series.datapoints.slice(0, limitIndex + 1)
+            }));
+
             renderCharts(subsetData);
         }
 
-        function renderCharts(data) {
-                // Cập nhật thông tin bệnh nhân (Age, Gender)
-                const ageData = data.find(d => d.target === 'Age');
-                const genderData = data.find(d => d.target === 'Gender');
-                
-                if (ageData && ageData.datapoints.length > 0) {
-                    document.getElementById('patientAge').textContent = 
-                        ageData.datapoints[0][0] || '-';
+        function getSeries(data, target) {
+            return data.find(d => d.target === target);
+        }
+
+        function getValues(data, target) {
+            const series = getSeries(data, target);
+            return series ? series.datapoints.map(point => point[0]) : [];
+        }
+
+        function getIcuHours(data) {
+            return getValues(data, "ICULOS").filter(value => value !== null && value !== undefined);
+        }
+
+        function updatePatientSummary(data, iculosValues) {
+            const ageValues = getValues(data, "Age");
+            const genderValues = getValues(data, "Gender");
+            const warningValues = getValues(data, "SepsisWarning");
+            const confirmedValues = getValues(data, "SepsisConfirmed");
+
+            document.getElementById("patientAge").textContent = ageValues.length ? (ageValues[0] ?? "-") : "-";
+
+            if (genderValues.length) {
+                const gender = genderValues[0];
+                document.getElementById("patientGender").textContent = gender === 0 ? "Female" : gender === 1 ? "Male" : "-";
+            } else {
+                document.getElementById("patientGender").textContent = "-";
+            }
+
+            const lastWarning = warningValues.length ? warningValues[warningValues.length - 1] : 0;
+            const lastConfirmed = confirmedValues.length ? confirmedValues[confirmedValues.length - 1] : 0;
+            const statusMetric = document.getElementById("statusMetric");
+            const patientStatus = document.getElementById("patientStatus");
+
+            statusMetric.classList.remove("status-normal", "status-warning", "status-confirmed");
+            if (lastConfirmed === 1) {
+                statusMetric.classList.add("status-confirmed");
+                patientStatus.textContent = "Confirmed";
+            } else if (lastWarning === 1) {
+                statusMetric.classList.add("status-warning");
+                patientStatus.textContent = "Suspected";
+            } else {
+                statusMetric.classList.add("status-normal");
+                patientStatus.textContent = "Normal";
+            }
+
+            document.getElementById("pointCount").textContent = `${iculosValues.length} records`;
+            const lastHour = iculosValues.length ? iculosValues[iculosValues.length - 1] : "-";
+            document.getElementById("hourRange").textContent = `ICU Hour ${lastHour}`;
+        }
+
+        function mapToIculos(series, iculosValues) {
+            const values = series.datapoints.map(point => point[0]);
+            return values
+                .map((value, index) => [iculosValues[index] ?? index + 1, value])
+                .filter(point => point[1] !== null && point[1] !== undefined);
+        }
+
+        function buildGroupedSeries(data, view, iculosValues) {
+            return data
+                .filter(series => view.group.has(series.target))
+                .map(series => {
+                    let mappedData = mapToIculos(series, iculosValues);
+                    if (series.target === "FiO2") {
+                        mappedData = mappedData.map(point => [point[0], point[1] * 100]);
+                    }
+
+                    const isSelected = selectedMetric === series.target;
+                    return {
+                        name: FIELD_NAMES[series.target] || series.target,
+                        data: mappedData,
+                        lineWidth: isSelected ? 4 : 2,
+                        zIndex: isSelected ? 8 : 1,
+                        marker: {
+                            radius: isSelected ? 4 : 3,
+                            symbol: "circle"
+                        }
+                    };
+                });
+        }
+
+        function buildSepsisSeries(data, iculosValues) {
+            const labels = getValues(data, "SepsisLabel");
+            const warnings = getValues(data, "SepsisWarning");
+            const confirmed = getValues(data, "SepsisConfirmed");
+            const probs = getValues(data, "SepsisProb");
+            const length = Math.max(labels.length, warnings.length, confirmed.length, probs.length, iculosValues.length);
+
+            const rawData = [];
+            const suspectedData = [];
+            const confirmedData = [];
+            const probabilityData = [];
+
+            for (let i = 0; i < length; i++) {
+                const hour = iculosValues[i] ?? i + 1;
+                const raw = labels[i] === 1 ? 1 : 0;
+                const warn = warnings[i] === 1 ? 1 : 0;
+                const conf = confirmed[i] === 1 ? 1 : 0;
+                const prob = probs[i];
+
+                rawData.push([hour, raw]);
+                suspectedData.push([hour, warn && !conf ? 1 : 0]);
+                confirmedData.push([hour, conf]);
+                if (prob !== null && prob !== undefined) {
+                    probabilityData.push([hour, prob]);
                 }
-                
-                if (genderData && genderData.datapoints.length > 0) {
-                    const genderValue = genderData.datapoints[0][0];
-                    document.getElementById('patientGender').textContent = 
-                        genderValue === 0 ? 'Female' : 'Male';
+            }
+
+            return [
+                {
+                    name: "Sepsis Probability",
+                    type: "spline",
+                    data: probabilityData,
+                    color: "#0ea5b7",
+                    lineWidth: selectedMetric === "SepsisProb" ? 5 : 3,
+                    zIndex: selectedMetric === "SepsisProb" ? 8 : 2,
+                    tooltip: { valueDecimals: 3 }
+                },
+                {
+                    name: "Raw Model Label",
+                    type: "line",
+                    data: rawData,
+                    color: "#111827",
+                    lineWidth: selectedMetric === "SepsisLabel" ? 4 : 2,
+                    zIndex: selectedMetric === "SepsisLabel" ? 8 : 3,
+                    step: "left"
+                },
+                {
+                    name: "Suspected Sepsis",
+                    type: "area",
+                    data: suspectedData,
+                    color: "rgba(196, 127, 16, 0.95)",
+                    fillColor: "rgba(196, 127, 16, 0.22)",
+                    lineWidth: selectedMetric === "SepsisWarning" ? 2 : 0,
+                    zIndex: selectedMetric === "SepsisWarning" ? 7 : 1,
+                    step: "left"
+                },
+                {
+                    name: "Confirmed Sepsis",
+                    type: "area",
+                    data: confirmedData,
+                    color: "rgba(194, 65, 75, 0.95)",
+                    fillColor: "rgba(194, 65, 75, 0.25)",
+                    lineWidth: selectedMetric === "SepsisConfirmed" ? 2 : 0,
+                    zIndex: selectedMetric === "SepsisConfirmed" ? 7 : 1,
+                    step: "left"
                 }
+            ];
+        }
 
-                // Lấy dữ liệu ICULOS (dùng làm trục X)
-                const iculosSeries = data.find(d => d.target === 'ICULOS');
-                let iculosValues = [];
-
-                if (!iculosSeries || iculosSeries.datapoints.length === 0) {
-                    iculosValues = [];
-                } else {
-                    iculosValues = iculosSeries.datapoints.map(point => point[0]);
-                }
-
-                // Hàm helper: ghép dữ liệu với ICULOS và lọc bỏ null để tự nối nét đứt
-                const mapToIculos = (series) => {
-                    const values = series.datapoints.map(point => point[0]);
-                    return values.map((val, i) => [iculosValues[i] || 0, val]).filter(p => p[1] !== null);
-                };
-
-                // Hàm filter và map dữ liệu cho từng nhóm
-                const getSeriesData = (groupSet) => {
-                    return data
-                        .filter(d => groupSet.has(d.target))
-                        .map(series => {
-                            let mappedData = mapToIculos(series);
-                            // Convert FiO2 from fraction (0.21-1.0) to percentage (21-100%) for better visualization
-                            if (series.target === 'FiO2') {
-                                mappedData = mappedData.map(point => [point[0], point[1] * 100]);
-                            }
-                            return {
-                                name: FIELD_NAMES[series.target] || series.target,
-                                data: mappedData
-                            };
-                        });
-                };
-
-                const vitalsSeries = getSeriesData(GROUPS.vitals);
-                const highScaleSeries = getSeriesData(GROUPS.highScale);
-                const mediumScaleSeries = getSeriesData(GROUPS.mediumScale);
-                const lowScaleVitalsSeries = getSeriesData(GROUPS.lowScaleVitalsHema);
-                const lowScaleBloodGasSeries = getSeriesData(GROUPS.lowScaleBloodGas);
-                const lowScaleElectrolytesSeries = getSeriesData(GROUPS.lowScaleElectrolytes);
-
-                // --- Lấy dữ liệu SepsisLabel, SepsisWarning, SepsisConfirmed ---
-                const sepsisLabelSeries = data.find(d => d.target === 'SepsisLabel');
-                const sepsisWarningSeries = data.find(d => d.target === 'SepsisWarning');
-                const sepsisConfirmedSeries = data.find(d => d.target === 'SepsisConfirmed');
-
-                let sepsisLabelData = [];
-                let sepsisWarningData = [];
-                let sepsisConfirmedData = [];
-
-                if (sepsisLabelSeries) {
-                    const values = sepsisLabelSeries.datapoints.map(point => point[0]);
-                    sepsisLabelData = values.map((val, i) => [iculosValues[i] || 0, val]);
-                }
-
-                if (sepsisWarningSeries) {
-                    const values = sepsisWarningSeries.datapoints.map(point => point[0]);
-                    sepsisWarningData = values.map((val, i) => [iculosValues[i] || 0, val]);
-                }
-
-                if (sepsisConfirmedSeries) {
-                    const values = sepsisConfirmedSeries.datapoints.map(point => point[0]);
-                    sepsisConfirmedData = values.map((val, i) => [iculosValues[i] || 0, val]);
-                }
-
-                // Tạo dữ liệu "chưa xác nhận" = warning=1 và confirmed=0
-                let unconfirmedData = [];
-                const n = Math.max(sepsisWarningData.length, sepsisConfirmedData.length);
-                for (let i = 0; i < n; i++) {
-                    const iculos = iculosValues[i] || (i > 0 ? iculosValues[i-1] + 1 : 0);
-                    const warn = (sepsisWarningData[i] && sepsisWarningData[i][1] === 1) ? 1 : 0;
-                    const conf = (sepsisConfirmedData[i] && sepsisConfirmedData[i][1] === 1) ? 1 : 0;
-                    unconfirmedData.push([iculos, (warn && !conf) ? 1 : 0]);
-                }
-
-                // Cấu hình trục X
-                const xAxisConfig = {
-                    title: { text: 'ICU Hour' },
-                    type: 'linear',
+        function baseChartConfig(series, yAxisOverride = {}) {
+            return {
+                chart: {
+                    type: "spline",
+                    backgroundColor: "#ffffff",
+                    zoomType: "x",
+                    animation: isSimulating,
+                    style: {
+                        fontFamily: "Segoe UI, Arial, sans-serif"
+                    }
+                },
+                title: { text: null },
+                credits: { enabled: false },
+                exporting: { enabled: true },
+                xAxis: {
+                    title: { text: "ICU Hour" },
+                    type: "linear",
                     min: 0,
                     allowDecimals: false,
-                    startOnTick: true,
-                    endOnTick: true
-                };
-
-                // Hàm helper để tạo hoặc update chart
-                const createOrUpdateChart = (chartInstance, containerId, title, seriesData) => {
-                    if (!chartInstance) {
-                        return Highcharts.chart(containerId, {
-                            chart: { type: 'spline', zoomType: 'x', animation: isSimulating },
-                            title: { text: title },
-                            xAxis: xAxisConfig,
-                            yAxis: { title: { text: null } },
-                            series: seriesData,
-                            legend: { enabled: true },
-                            tooltip: { shared: true, valueDecimals: 2 },
-                            plotOptions: {
-                                series: {
-                                    connectNulls: true,
-                                    marker: { radius: 3, symbol: 'circle' }
-                                }
-                            }
-                        });
-                    } else {
-                        chartInstance.update({ xAxis: xAxisConfig, series: seriesData }, true, true, false);
-                        return chartInstance;
+                    gridLineWidth: 1,
+                    gridLineColor: "#e6eef1",
+                    lineColor: "#b8c8ce",
+                    tickColor: "#b8c8ce"
+                },
+                yAxis: Object.assign({
+                    title: { text: null },
+                    gridLineColor: "#e6eef1",
+                    lineColor: "#b8c8ce",
+                    tickColor: "#b8c8ce"
+                }, yAxisOverride),
+                legend: {
+                    enabled: true,
+                    align: "center",
+                    verticalAlign: "bottom",
+                    itemStyle: { color: "#334155", fontWeight: "600" }
+                },
+                tooltip: {
+                    shared: true,
+                    valueDecimals: 2
+                },
+                plotOptions: {
+                    series: {
+                        connectNulls: true,
+                        marker: { radius: 3, symbol: "circle" },
+                        animation: isSimulating
                     }
-                };
+                },
+                series
+            };
+        }
 
-                vitalsChart = createOrUpdateChart(vitalsChart, 'vitalsChart', 'Vitals & Blood Pressure (Scale 40-150)', vitalsSeries);
-                highScaleChart = createOrUpdateChart(highScaleChart, 'highScaleChart', 'High Scale Labs (Glucose, Platelets, etc. Scale 50-500+)', highScaleSeries);
-                mediumScaleChart = createOrUpdateChart(mediumScaleChart, 'mediumScaleChart', 'Medium Scale Labs (Chloride, PaCO2, etc. Scale 20-110)', mediumScaleSeries);
-                lowScaleVitalsChart = createOrUpdateChart(lowScaleVitalsChart, 'lowScaleVitalsChart', 'Low Scale Vitals & Hema (Temp, Resp, WBC, Hgb)', lowScaleVitalsSeries);
-                lowScaleBloodGasChart = createOrUpdateChart(lowScaleBloodGasChart, 'lowScaleBloodGasChart', 'Low Scale Blood Gas & Markers (pH, Lactate, BaseExcess, Troponin)', lowScaleBloodGasSeries);
-                lowScaleElectrolytesChart = createOrUpdateChart(lowScaleElectrolytesChart, 'lowScaleElectrolytesChart', 'Low Scale Electrolytes & Renal/Liver (Ca, K, Mg, Creatinine)', lowScaleElectrolytesSeries);
+        function renderActiveChart(data, iculosValues) {
+            const view = CHART_VIEWS.find(item => item.id === activeView) || CHART_VIEWS[0];
+            const activeRole = document.getElementById("activeRole");
+            document.getElementById("activeSubtitle").textContent = view.subtitle;
+            document.getElementById("activeTitle").textContent = view.title;
+            activeRole.textContent = viewRole(view);
+            activeRole.className = `role-badge ${viewRoleClass(view)}`;
 
-                if (!sepsisChart) {
-                    sepsisChart = Highcharts.chart('sepsisChart', {
-                        chart: { type: 'line', animation: isSimulating },
-                        title: { text: 'Sepsis Alert' },
-                        xAxis: xAxisConfig,
-                        yAxis: { 
-                            title: { text: 'Sepsis Status' },
-                            min: -0.2, max: 1.2, tickInterval: 1,
-                            labels: { formatter: function() { return this.value === 1 ? 'Yes' : this.value === 0 ? 'No' : ''; } }
-                        },
-                        plotOptions: {
-                            line: { step: 'left', marker: { enabled: false } },
-                            area: { step: 'left', marker: { enabled: false } }
-                        },
-                        series: [
-                            {
-                                name: 'Sepsis Label (Raw)', data: sepsisLabelData, lineWidth: 2,
-                                zones: [{ value: 0.5, color: '#00db5fff' }, { color: '#f80939ff' }], zIndex: 4
-                            },
-                            {
-                                name: 'Suspected Sepsis', type: 'area', data: unconfirmedData,
-                                color: 'rgba(246, 207, 12, 1)', fillColor: 'rgba(244, 207, 35, 0.5)', lineWidth: 0, zIndex: 2
-                            },
-                            {
-                                name: 'Confirmed Sepsis', type: 'area', data: sepsisConfirmedData,
-                                color: 'rgba(206, 30, 65, 1)', fillColor: 'rgba(202, 75, 100, 0.79)', lineWidth: 0, zIndex: 3
-                            }
-                        ],
-                        tooltip: {
-                            shared: true,
-                            formatter: function() {
-                                let s = `<b>ICULOS: ${this.x}h</b><br/>`;
-                                this.points.forEach(point => {
-                                    if (point.series.name.includes('Sepsis')) {
-                                        const val = point.y === 1 ? 'Yes' : 'No';
-                                        s += `<span style="color:${point.series.color}">●</span> ${point.series.name}: <b>${val}</b><br/>`;
-                                    }
-                                });
-                                return s;
-                            }
-                        },
-                        legend: { enabled: true }
+            let chartConfig;
+            if (view.special === "sepsis") {
+                chartConfig = baseChartConfig(buildSepsisSeries(data, iculosValues), {
+                    min: -0.05,
+                    max: 1.05,
+                    tickInterval: 0.25,
+                    title: { text: "Probability / Status" },
+                    labels: {
+                        formatter: function() {
+                            if (this.value === 1) return "Yes";
+                            if (this.value === 0) return "No";
+                            return this.value;
+                        }
+                    }
+                });
+                chartConfig.chart.type = "line";
+                chartConfig.tooltip.formatter = function() {
+                    let s = `<b>ICU Hour: ${this.x}</b><br/>`;
+                    this.points.forEach(point => {
+                        const value = point.series.name.includes("Probability") ? point.y.toFixed(3) : (point.y === 1 ? "Yes" : "No");
+                        s += `<span style="color:${point.color}">\u25CF</span> ${point.series.name}: <b>${value}</b><br/>`;
                     });
-                } else {
-                    sepsisChart.series[0].setData(sepsisLabelData, false);
-                    sepsisChart.series[1].setData(unconfirmedData, false);
-                    sepsisChart.series[2].setData(sepsisConfirmedData, false);
-                    sepsisChart.redraw();
+                    return s;
+                };
+            } else {
+                chartConfig = baseChartConfig(buildGroupedSeries(data, view, iculosValues));
+            }
+
+            document.getElementById("emptyState").classList.toggle("visible", !iculosValues.length);
+            document.getElementById("activeChart").style.display = iculosValues.length ? "block" : "none";
+
+            if (!iculosValues.length) {
+                if (activeChart) {
+                    activeChart.destroy();
+                    activeChart = null;
+                    activeViewRendered = null;
                 }
+                return;
+            }
+
+            if (activeChart && activeViewRendered === activeView) {
+                activeChart.update(chartConfig, true, true, false);
+            } else {
+                if (activeChart) activeChart.destroy();
+                activeChart = Highcharts.chart("activeChart", chartConfig);
+                activeViewRendered = activeView;
+            }
+
+            updateMetricInfoBox(selectedMetric ? { key: selectedMetric, info: METRIC_INFO[selectedMetric] } : null);
+        }
+
+        function renderCharts(data) {
+            latestData = data;
+            const iculosValues = getIcuHours(data);
+            updatePatientSummary(data, iculosValues);
+            renderActiveChart(data, iculosValues);
         }
 
         async function startSimulation() {
             if (simulationInterval) clearInterval(simulationInterval);
             isSimulating = true;
             currentSimIndex = 0;
-            lastDataKey = ""; // Bỏ qua bộ đệm
-            
-            // Xóa biểu đồ cũ
-            const charts = [vitalsChart, highScaleChart, mediumScaleChart, lowScaleVitalsChart, lowScaleBloodGasChart, lowScaleElectrolytesChart, sepsisChart];
-            charts.forEach(c => { if(c) c.destroy(); });
-            
-            vitalsChart = highScaleChart = mediumScaleChart = lowScaleVitalsChart = lowScaleBloodGasChart = lowScaleElectrolytesChart = sepsisChart = null;
+            lastDataKey = "";
+
+            if (activeChart) {
+                activeChart.destroy();
+                activeChart = null;
+                activeViewRendered = null;
+            }
 
             const data = await fetchFullDataForSimulation();
-            if (!data || data.length === 0) return;
+            if (!data || data.length === 0) {
+                isSimulating = false;
+                renderCharts([]);
+                return;
+            }
 
             const maxPoints = data[0].datapoints.length;
-            const speed = parseInt(document.getElementById('speedSelect').value);
+            const speed = parseInt(document.getElementById("speedSelect").value, 10);
             const intervalMs = 1000 / speed;
 
             simulationInterval = setInterval(() => {
@@ -566,36 +1746,41 @@
         }
 
         async function fetchData() {
-            if (isSimulating) return; // Nếu đang chạy Demo thì ngưng gọi API tự động
-            
-            try {
-                const res = await fetch(`/query?patient_id=${currentPatient}`);
-                const data = await res.json();
-                
-                // Lấy ICULOS để kiểm tra cache
-                const iculosSeries = data.find(d => d.target === 'ICULOS');
-                let iculosValues = [];
-                if (iculosSeries) iculosValues = iculosSeries.datapoints.map(point => point[0]);
+            if (isSimulating) return;
 
-                const currentDataKey = currentPatient + "_" + iculosValues.length;
+            try {
+                const res = await fetch(`/query?patient_id=${encodeURIComponent(currentPatient)}`);
+                const data = await res.json();
+                const iculosValues = getIcuHours(data);
+                const currentDataKey = `${currentPatient}_${iculosValues.length}_${activeView}`;
+
                 if (currentDataKey === lastDataKey) return;
                 lastDataKey = currentDataKey;
-
                 renderCharts(data);
-
             } catch (error) {
-                console.error('Error fetching data:', error);
+                console.error("Error fetching data:", error);
             }
         }
 
         function changePatient() {
+            const nextPatient = document.getElementById("patientSelect").value.trim();
+            if (!nextPatient) return;
+
             stopSimulation();
-            currentPatient = document.getElementById('patientSelect').value;
-            document.getElementById('patientId').textContent = currentPatient;
-            lastDataKey = ""; // Reset key để buộc update khi đổi bệnh nhân
+            currentPatient = nextPatient;
+            document.getElementById("patientId").textContent = currentPatient;
+            updatePatientChips();
+            lastDataKey = "";
             fetchData();
         }
 
+        renderChartMenu();
+        renderMetricSuggestions();
+        document.getElementById("metricSearch").addEventListener("input", handleMetricSearch);
+        document.querySelectorAll(".patient-chip").forEach(button => {
+            button.addEventListener("click", () => selectDemoPatient(button.dataset.patient));
+        });
+        updatePatientChips();
         setInterval(fetchData, 2000);
         fetchData();
     </script>

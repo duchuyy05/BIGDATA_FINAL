@@ -35,7 +35,7 @@ services:
         condition: service_healthy
     command: >
       bash -c "
-        kafka-topics --create --bootstrap-server kafka:9092 --topic icu_data --partitions 3 --replication-factor 1 2>/dev/null || true;
+        kafka-topics --create --bootstrap-server kafka:9092 --topic ${KAFKA_TOPIC:-icu_data} --partitions 3 --replication-factor 1 2>/dev/null || true;
       "
 
   cassandra:
@@ -44,11 +44,12 @@ services:
     ports:
       - "9042:9042"
     volumes:
-      - type: tmpfs
-        target: /var/lib/cassandra
+      - cassandra-data:/var/lib/cassandra
       - ./cassandra/init.cql:/docker-entrypoint-initdb.d/init.cql
     environment:
       - CASSANDRA_CLUSTER_NAME=ICUMonitoring
+      - MAX_HEAP_SIZE=512M
+      - HEAP_NEWSIZE=128M
     healthcheck:
       test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
       interval: 10s
@@ -73,6 +74,23 @@ services:
         exit 0
       "
 
+  data-prep:
+    image: python:3.10-slim
+    container_name: data-prep
+    working_dir: /workspace
+    environment:
+      - USE_X_PATIENTS=${USE_X_PATIENTS:-false}
+      - X_PATIENTS=${X_PATIENTS:-100}
+      - MAX_PATIENTS=${MAX_PATIENTS:-100}
+      - DELAY=${DELAY:-2}
+      - ACTIVE_DATA_DIR=${ACTIVE_DATA_DIR:-/data/active}
+      - SAMPLE_DATA_DIR=/data/sample
+      - DEMO_PATIENT_IDS=${DEMO_PATIENT_IDS:-}
+    volumes:
+      - ./data:/data
+      - ./scripts:/scripts:ro
+    command: python /scripts/prepare_demo_data.py
+
   nifi:
     image: apache/nifi:latest
     container_name: nifi
@@ -96,10 +114,17 @@ services:
     build: ./nifi
     container_name: nifi-setup
     depends_on:
+      data-prep:
+        condition: service_completed_successfully
       nifi:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_TOPIC=${KAFKA_TOPIC:-icu_data}
+      - NIFI_DATA_DIRS=${ACTIVE_DATA_DIR:-/data/active}
+      - DELAY=${DELAY:-2}
     command: >
       --nifi-url https://nifi:8443/nifi-api
       --username admin
@@ -153,12 +178,12 @@ services:
   spark-worker:
     build: ./spark
     deploy:
-      replicas: 2
+      replicas: ${SPARK_WORKER_REPLICAS:-1}
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_CORES=4
-      - SPARK_WORKER_MEMORY=4g
+      - SPARK_WORKER_CORES=${SPARK_WORKER_CORES:-1}
+      - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-1g}
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     volumes:
       - spark-checkpoints:/tmp/checkpoint
@@ -168,6 +193,11 @@ services:
   spark-app:
     build: ./spark
     container_name: spark-app
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC=${KAFKA_TOPIC:-icu_data}
+      - MAX_OFFSETS_PER_TRIGGER=${MAX_OFFSETS_PER_TRIGGER:-4}
+      - SPARK_CHECKPOINT_LOCATION=${SPARK_CHECKPOINT_LOCATION:-/tmp/checkpoint/active}
     volumes:
       - spark-checkpoints:/tmp/checkpoint
       - ./spark/ivy2:/home/spark/.ivy2
@@ -196,7 +226,7 @@ services:
       - --conf
       - spark.cassandra.connection.host=cassandra
       - --conf
-      - spark.sql.streaming.checkpointLocation=/tmp/checkpoint
+      - spark.sql.streaming.checkpointLocation=${SPARK_CHECKPOINT_LOCATION:-/tmp/checkpoint/active}
       - /app/spark_stream.py
 
   api:
@@ -205,11 +235,16 @@ services:
       replicas: 2
     environment:
       - CASSANDRA_HOST=cassandra
-      - DATA_DIR=/data
+      - DATA_DIR=${ACTIVE_DATA_DIR:-/data/active}
+      - DEMO_PATIENT_IDS=${DEMO_PATIENT_IDS:-}
+      - USE_X_PATIENTS=${USE_X_PATIENTS:-false}
+      - X_PATIENTS=${X_PATIENTS:-100}
       - MAX_PATIENTS=${MAX_PATIENTS:-10}
     volumes:
       - ./data:/data:ro
     depends_on:
+      data-prep:
+        condition: service_completed_successfully
       cassandra-init:  
         condition: service_completed_successfully
 
@@ -225,3 +260,4 @@ services:
 
 volumes:
   spark-checkpoints:
+  cassandra-data:

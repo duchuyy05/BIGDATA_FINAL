@@ -11,6 +11,7 @@ import json
 import time
 import mlflow
 import mlflow.xgboost
+import os
 from collections import deque
 from typing import Iterable, Tuple
 
@@ -19,6 +20,10 @@ from mlflow.tracking import MlflowClient
 
 mlflow.set_tracking_uri("http://mlflow:5001")
 model_name = "sepsis_xgboost_model"
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "icu_data")
+MAX_OFFSETS_PER_TRIGGER = os.getenv("MAX_OFFSETS_PER_TRIGGER", "4")
+CHECKPOINT_LOCATION = os.getenv("SPARK_CHECKPOINT_LOCATION", "/tmp/checkpoint/active")
 
 xgb_model = None
 optimal_threshold = 0.5
@@ -278,20 +283,20 @@ def process_patient_state(key: Tuple[str], pdfs: Iterable[pd.DataFrame], state: 
 spark = SparkSession.builder \
     .appName("KafkaToCassandraWithModel") \
     .config("spark.cassandra.connection.host", "cassandra") \
-    .config("spark.sql.streaming.checkpointLocation", "/tmp/checkpoint") \
+    .config("spark.sql.streaming.checkpointLocation", CHECKPOINT_LOCATION) \
     .config("spark.sql.execution.arrow.pyspark.enabled", "true") \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
 
-topics = "icu_data"
+topics = KAFKA_TOPIC
 
 df = spark \
     .readStream \
     .format("kafka") \
-    .option("kafka.bootstrap.servers", "kafka:9092") \
+    .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS) \
     .option("subscribe", topics) \
-    .option("maxOffsetsPerTrigger", 4) \
+    .option("maxOffsetsPerTrigger", MAX_OFFSETS_PER_TRIGGER) \
     .option("startingOffsets", "earliest") \
     .load()
 
@@ -325,7 +330,7 @@ query = output_df.writeStream \
     .format("org.apache.spark.sql.cassandra") \
     .option("keyspace", "sepsis_monitoring") \
     .option("table", "icu_readings") \
-    .option("checkpointLocation", "/tmp/checkpoint") \
+    .option("checkpointLocation", CHECKPOINT_LOCATION) \
     .outputMode("append") \
     .start()
 

@@ -10,6 +10,11 @@ KEYSPACE = 'sepsis_monitoring'
 DATA_DIR = Path(os.getenv('DATA_DIR', '/data/active'))
 DEFAULT_PATIENT_IDS = ["p000001"]
 
+try:
+    SEPSIS_THRESHOLD = float(os.getenv('SEPSIS_THRESHOLD', '0.53'))
+except ValueError:
+    SEPSIS_THRESHOLD = 0.53
+
 cluster = Cluster([CASSANDRA_HOST])
 session = cluster.connect(KEYSPACE)
 
@@ -112,7 +117,8 @@ def dashboard():
         'dashboard.html',
         patient_ids=discover_patient_ids(),
         demo_mode=demo_mode_label(manifest),
-        data_dir=str(DATA_DIR)
+        data_dir=str(DATA_DIR),
+        sepsis_threshold=SEPSIS_THRESHOLD
     )
 
 @app.route('/patients')

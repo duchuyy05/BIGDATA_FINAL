@@ -198,9 +198,11 @@ services:
       - KAFKA_TOPIC=${KAFKA_TOPIC:-icu_data}
       - MAX_OFFSETS_PER_TRIGGER=${MAX_OFFSETS_PER_TRIGGER:-4}
       - SPARK_CHECKPOINT_LOCATION=${SPARK_CHECKPOINT_LOCATION:-/tmp/checkpoint/active}
+      - MODEL_SOURCE=${MODEL_SOURCE:-local}
+      - LOCAL_MODEL_DIR=${LOCAL_MODEL_DIR:-/app/models/kaggle_export}
     volumes:
       - spark-checkpoints:/tmp/checkpoint
-      - ./spark/ivy2:/home/spark/.ivy2
+      - ./spark/ivy2:/root/.ivy2
       - ./spark/app:/app
     depends_on:
       spark-master:
@@ -222,7 +224,7 @@ services:
       - --conf
       - spark.executor.extraJavaOptions=-XX:-UseContainerSupport
       - --packages
-      - org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.4,com.datastax.spark:spark-cassandra-connector_2.12:3.5.0
+      - org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.spark:spark-token-provider-kafka-0-10_2.12:3.5.0,org.apache.kafka:kafka-clients:3.4.1,com.datastax.spark:spark-cassandra-connector_2.12:3.5.0
       - --conf
       - spark.cassandra.connection.host=cassandra
       - --conf
@@ -240,6 +242,7 @@ services:
       - USE_X_PATIENTS=${USE_X_PATIENTS:-false}
       - X_PATIENTS=${X_PATIENTS:-100}
       - MAX_PATIENTS=${MAX_PATIENTS:-10}
+      - SEPSIS_THRESHOLD=${SEPSIS_THRESHOLD:-0.53}
     volumes:
       - ./data:/data:ro
     depends_on:

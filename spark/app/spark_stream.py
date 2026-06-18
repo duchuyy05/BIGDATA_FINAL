@@ -12,6 +12,7 @@ import time
 import mlflow
 import mlflow.xgboost
 import os
+from pathlib import Path
 from collections import deque
 from typing import Iterable, Tuple
 
@@ -24,43 +25,96 @@ KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "icu_data")
 MAX_OFFSETS_PER_TRIGGER = os.getenv("MAX_OFFSETS_PER_TRIGGER", "4")
 CHECKPOINT_LOCATION = os.getenv("SPARK_CHECKPOINT_LOCATION", "/tmp/checkpoint/active")
+MODEL_SOURCE = os.getenv("MODEL_SOURCE", "local").strip().lower()
+LOCAL_MODEL_DIR = Path(os.getenv("LOCAL_MODEL_DIR", "/app/models/kaggle_export"))
 
 xgb_model = None
 optimal_threshold = 0.5
 scaler_params = None
+metadata_params = None
+model_best_iteration = None
 
-for i in range(15):
+def load_local_kaggle_model(model_dir: Path):
+    model_path = model_dir / "model.json"
+    scaler_path = model_dir / "scaler.json"
+    metadata_path = model_dir / "metadata.json"
+    missing = [str(path) for path in [model_path, scaler_path, metadata_path] if not path.exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing local model files: {missing}")
+
+    booster = xgb.Booster()
+    booster.load_model(str(model_path))
+
+    with open(scaler_path, "r") as f:
+        scaler = json.load(f)
+    with open(metadata_path, "r") as f:
+        metadata = json.load(f)
+
+    print(f"Model loaded from local Kaggle export: {model_dir}")
+    return booster, scaler, metadata
+
+
+def load_latest_mlflow_model():
+    client = MlflowClient("http://mlflow:5001")
+    experiment = client.get_experiment_by_name("sepsis_prediction")
+    if experiment is None:
+        raise Exception("Experiment not found yet")
+
+    runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        order_by=["start_time DESC"],
+        max_results=1
+    )
+    if len(runs) == 0:
+        raise Exception("No MLflow runs found")
+
+    run_id = runs[0].info.run_id
+    booster = mlflow.xgboost.load_model(f"runs:/{run_id}/model")
+    run = client.get_run(run_id)
+
+    local_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="scaler.json")
+    with open(local_path, "r") as f:
+        scaler = json.load(f)
+
+    metadata = {
+        "optimal_threshold": run.data.metrics.get("optimal_threshold", 0.5),
+        "model_source": "mlflow",
+    }
+    print("Model loaded from MLflow successfully!")
+    return booster, scaler, metadata
+
+
+if MODEL_SOURCE not in {"local", "mlflow", "auto"}:
+    print(f"Unknown MODEL_SOURCE={MODEL_SOURCE}. Falling back to local.")
+    MODEL_SOURCE = "local"
+
+if MODEL_SOURCE in {"local", "auto"}:
     try:
-        client = MlflowClient("http://mlflow:5001")
-        experiment = client.get_experiment_by_name("sepsis_prediction")
-        if experiment is None:
-            raise Exception("Experiment not found yet")
-            
-        runs = client.search_runs(
-            experiment_ids=[experiment.experiment_id],
-            order_by=["start_time DESC"],
-            max_results=1
-        )
-        if len(runs) > 0:
-            run_id = runs[0].info.run_id
-            xgb_model = mlflow.xgboost.load_model(f"runs:/{run_id}/model")
-            print("Model loaded from MLflow successfully!")
-            
-            run = client.get_run(run_id)
-            optimal_threshold = run.data.metrics.get("optimal_threshold", 0.5)
-            print(f"Loaded optimal threshold: {optimal_threshold}")
-            
-            local_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="scaler.json")
-            with open(local_path, "r") as f:
-                scaler_params = json.load(f)
-            print("Loaded dynamic scaler params from MLflow!")
-            
-        break
+        xgb_model, scaler_params, metadata_params = load_local_kaggle_model(LOCAL_MODEL_DIR)
     except Exception as e:
-        print(f"Waiting for MLflow model {model_name} to be ready... ({i+1}/15): {e}")
-        time.sleep(10)
-else:
-    print("Warning: Failed to load model from MLflow. Proceeding without model.")
+        print(f"Local model load failed: {e}")
+
+if xgb_model is None and MODEL_SOURCE in {"mlflow", "auto"}:
+    for i in range(15):
+        try:
+            xgb_model, scaler_params, metadata_params = load_latest_mlflow_model()
+            break
+        except Exception as e:
+            print(f"Waiting for MLflow model {model_name} to be ready... ({i+1}/15): {e}")
+            time.sleep(10)
+    else:
+        print("Warning: Failed to load model from local export and MLflow. Proceeding without model.")
+elif xgb_model is None:
+    print("Warning: Failed to load local model. Proceeding without model because MODEL_SOURCE=local.")
+
+if metadata_params:
+    optimal_threshold = float(metadata_params.get("optimal_threshold", optimal_threshold))
+    model_best_iteration = metadata_params.get("best_iteration")
+    if model_best_iteration is not None:
+        model_best_iteration = int(model_best_iteration)
+    print(f"Loaded optimal threshold: {optimal_threshold}")
+    if model_best_iteration is not None:
+        print(f"Loaded best iteration: {model_best_iteration}")
 
 if scaler_params:
     varmeans = scaler_params["varmeans"]
@@ -82,6 +136,18 @@ feature_order = [
 ]
 
 log_indices = {14, 15, 16, 19, 20, 22, 25, 26, 27, 30, 31, 32}
+if metadata_params:
+    feature_order = metadata_params.get("feature_order", feature_order)
+    log_indices = set(metadata_params.get("log_indices", list(log_indices)))
+WINDOW_SIZE = int(metadata_params.get("window_size", 6)) if metadata_params else 6
+FEATURES_PER_HOUR = len(feature_order) * 3
+
+def predict_xgb_probability(dmatrix):
+    if xgb_model is None:
+        return 0.0
+    if model_best_iteration is not None:
+        return float(xgb_model.predict(dmatrix, iteration_range=(0, model_best_iteration + 1))[0])
+    return float(xgb_model.predict(dmatrix)[0])
 
 def predict_sepsis_xgb(pdf: pd.DataFrame, pid: str):
     if len(pdf) == 0: return {'prob': 0.0, 'label': 0}
@@ -90,7 +156,7 @@ def predict_sepsis_xgb(pdf: pd.DataFrame, pid: str):
     
     data = np.copy(data_40)
     T, D = data.shape
-    if D != 40: return {'prob': 0.0, 'label': 0}
+    if D != len(feature_order): return {'prob': 0.0, 'label': 0}
 
     nan_idx = np.where(np.isnan(data))
     mask = np.ones_like(data)
@@ -99,14 +165,14 @@ def predict_sepsis_xgb(pdf: pd.DataFrame, pid: str):
 
     forward = np.copy(data[0, :])
     for t in range(T):
-        for i in range(40):
+        for i in range(len(feature_order)):
             if mask[t, i] == 1: forward[i] = data[t, i]
             else: data[t, i] = forward[i]
 
     delta = np.zeros_like(data)
     for t in range(1, T): delta[t, :] = data[t, :] - data[t - 1, :]
 
-    for i in range(40):
+    for i in range(len(feature_order)):
         if i in log_indices:
             data[:, i] = np.clip(data[:, i], 1e-6, None)
             data[:, i] = 10 * (np.log(data[:, i]) - varlogmeans[i]) / varlogstds[i]
@@ -116,15 +182,15 @@ def predict_sepsis_xgb(pdf: pd.DataFrame, pid: str):
     full_data = np.concatenate([data, delta, mask], axis=1)
 
     row = list(full_data[-1, :])
-    for j in range(1, 6):
+    for j in range(1, WINDOW_SIZE):
         if T > j: row.extend(full_data[-(j + 1), :])
-        else: row.extend([0.0] * 120)
+        else: row.extend([0.0] * FEATURES_PER_HOUR)
 
     row = np.array([row])
     
     try:
         dtest = xgb.DMatrix(row)
-        pred_prob = float(xgb_model.predict(dtest)[0])
+        pred_prob = predict_xgb_probability(dtest)
         pred_label = int(pred_prob >= optimal_threshold)
         return {'prob': pred_prob, 'label': pred_label}
     except Exception:
@@ -171,13 +237,13 @@ icu_schema = StructType([
     StructField("Unit2", DoubleType(), True),
     StructField("HospAdmTime", DoubleType(), True),
     StructField("ICULOS", DoubleType(), True),
+    StructField("SepsisLabel", IntegerType(), True),
     StructField("patient_id", StringType(), True),
     StructField("icu_time_step", IntegerType(), True)
 ])
 
 output_schema = StructType(icu_schema.fields + [
     StructField("event_time", TimestampType(), True),
-    StructField("SepsisLabel", IntegerType(), True),
     StructField("SepsisProb", DoubleType(), True),
     StructField("SepsisWarning", IntegerType(), True),
     StructField("SepsisConfirmed", IntegerType(), True)
@@ -260,7 +326,6 @@ def process_patient_state(key: Tuple[str], pdfs: Iterable[pd.DataFrame], state: 
                 warning_state['ever_confirmed'] = True
                 
         row_dict = row.to_dict()
-        row_dict['SepsisLabel'] = raw_label
         row_dict['SepsisProb'] = prob
         row_dict['SepsisWarning'] = int(warning_state['has_warning'])
         row_dict['SepsisConfirmed'] = int(is_confirmed)
@@ -297,6 +362,7 @@ df = spark \
     .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS) \
     .option("subscribe", topics) \
     .option("maxOffsetsPerTrigger", MAX_OFFSETS_PER_TRIGGER) \
+    .option("failOnDataLoss", "false") \
     .option("startingOffsets", "earliest") \
     .load()
 

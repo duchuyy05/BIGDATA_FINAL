@@ -791,6 +791,7 @@
         let activeViewRendered = null;
         let latestData = null;
         let selectedMetric = null;
+        const SEPSIS_THRESHOLD = Number({{ sepsis_threshold|tojson }});
 
         const GROUPS = {
             vitals: new Set(["HR", "O2Sat", "SBP", "MAP", "DBP"]),
@@ -891,7 +892,7 @@
                 id: "sepsis",
                 subtitle: "Prediction",
                 title: "Sepsis Alert",
-                description: "Raw label, suspected sepsis, confirmed sepsis",
+                description: "Risk probability, true sepsis label, alert markers",
                 special: "sepsis",
                 color: "#dc2626"
             }
@@ -1179,12 +1180,12 @@
                 aliases: ["probability", "risk", "sepsis probability"]
             },
             SepsisLabel: {
-                name: "Raw Model Label",
+                name: "True Sepsis Label",
                 unit: "0 or 1",
                 view: "sepsis",
-                group: "Prediction",
-                description: "Binary model output after comparing SepsisProb with the chosen threshold. It is the raw positive/negative signal.",
-                aliases: ["raw label", "model label"]
+                group: "Ground Truth",
+                description: "Dataset label from the original PhysioNet patient file. A value of 1 marks ICU hours that belong to the true sepsis period.",
+                aliases: ["true label", "ground truth", "actual sepsis", "real sepsis", "sepsis label"]
             },
             SepsisWarning: {
                 name: "Suspected Sepsis",
@@ -1240,9 +1241,9 @@
             Bilirubin_total: "Đường này biểu diễn bilirubin toàn phần theo từng ICU Hour. Chỉ số này giúp theo dõi chức năng gan và đường mật.",
             Bilirubin_direct: "Đường này biểu diễn bilirubin trực tiếp theo từng ICU Hour. Nó giúp đánh giá chi tiết hơn tình trạng gan và bài tiết mật.",
             SepsisProb: "Đường này biểu diễn xác suất sepsis do model dự đoán theo từng ICU Hour. Giá trị càng cao nghĩa là model càng thấy nhiều dấu hiệu giống sepsis.",
-            SepsisLabel: "Đường này biểu diễn kết quả 0/1 thô của model theo từng ICU Hour sau khi so sánh xác suất với ngưỡng.",
-            SepsisWarning: "Vùng này biểu diễn trạng thái nghi ngờ sepsis theo từng ICU Hour. Nó được bật khi các dự đoán gần đây cho thấy nguy cơ sepsis.",
-            SepsisConfirmed: "Vùng này biểu diễn trạng thái sepsis đã được xác nhận theo logic cảnh báo của Spark qua từng ICU Hour."
+            SepsisLabel: "This marker shows the real sepsis label from the dataset at each ICU hour. It is used to compare model alerts against the true patient timeline.",
+            SepsisWarning: "This marker shows ICU hours where the streaming logic is in suspected sepsis alert state based on recent model outputs.",
+            SepsisConfirmed: "This marker shows ICU hours where the Spark alert logic has moved from suspected state into confirmed alert state."
         };
 
         const CHART_COLORS = ["#0ea5b7", "#0f766e", "#f2c94c", "#ef6c35", "#4f7fbf", "#8b5cf6", "#22c55e", "#e11d48", "#64748b"];
@@ -1518,73 +1519,132 @@
                 });
         }
 
+        function buildTrueSepsisBands(labels, iculosValues) {
+            const bands = [];
+            let bandStart = null;
+            let previousHour = null;
+
+            for (let i = 0; i < labels.length; i++) {
+                const hour = Number(iculosValues[i] ?? i + 1);
+                const isTrueSepsis = Number(labels[i]) === 1;
+
+                if (isTrueSepsis && bandStart === null) {
+                    bandStart = hour - 0.5;
+                }
+
+                if (!isTrueSepsis && bandStart !== null) {
+                    bands.push({
+                        from: bandStart,
+                        to: (previousHour ?? hour) + 0.5,
+                        color: "rgba(220, 38, 38, 0.10)"
+                    });
+                    bandStart = null;
+                }
+
+                previousHour = hour;
+            }
+
+            if (bandStart !== null && previousHour !== null) {
+                bands.push({
+                    from: bandStart,
+                    to: previousHour + 0.5,
+                    color: "rgba(220, 38, 38, 0.10)"
+                });
+            }
+
+            return bands;
+        }
+
         function buildSepsisSeries(data, iculosValues) {
-            const labels = getValues(data, "SepsisLabel");
+            const trueLabels = getValues(data, "SepsisLabel");
             const warnings = getValues(data, "SepsisWarning");
             const confirmed = getValues(data, "SepsisConfirmed");
             const probs = getValues(data, "SepsisProb");
-            const length = Math.max(labels.length, warnings.length, confirmed.length, probs.length, iculosValues.length);
+            const length = Math.max(trueLabels.length, warnings.length, confirmed.length, probs.length, iculosValues.length);
 
-            const rawData = [];
-            const suspectedData = [];
-            const confirmedData = [];
             const probabilityData = [];
+            const actualSepsisData = [];
+            const suspectedMarkers = [];
+            const confirmedMarkers = [];
 
             for (let i = 0; i < length; i++) {
                 const hour = iculosValues[i] ?? i + 1;
-                const raw = labels[i] === 1 ? 1 : 0;
-                const warn = warnings[i] === 1 ? 1 : 0;
-                const conf = confirmed[i] === 1 ? 1 : 0;
+                const trueLabel = Number(trueLabels[i]) === 1;
+                const warn = Number(warnings[i]) === 1;
+                const conf = Number(confirmed[i]) === 1;
                 const prob = probs[i];
 
-                rawData.push([hour, raw]);
-                suspectedData.push([hour, warn && !conf ? 1 : 0]);
-                confirmedData.push([hour, conf]);
                 if (prob !== null && prob !== undefined) {
                     probabilityData.push([hour, prob]);
                 }
+                if (trueLabel) {
+                    actualSepsisData.push([hour, 1.06]);
+                }
+                if (warn && !conf) {
+                    suspectedMarkers.push([hour, 0.08]);
+                }
+                if (conf) {
+                    confirmedMarkers.push([hour, 0.16]);
+                }
             }
 
-            return [
-                {
-                    name: "Sepsis Probability",
-                    type: "spline",
-                    data: probabilityData,
-                    color: "#0ea5b7",
-                    lineWidth: selectedMetric === "SepsisProb" ? 5 : 3,
-                    zIndex: selectedMetric === "SepsisProb" ? 8 : 2,
-                    tooltip: { valueDecimals: 3 }
-                },
-                {
-                    name: "Raw Model Label",
-                    type: "line",
-                    data: rawData,
-                    color: "#111827",
-                    lineWidth: selectedMetric === "SepsisLabel" ? 4 : 2,
-                    zIndex: selectedMetric === "SepsisLabel" ? 8 : 3,
-                    step: "left"
-                },
-                {
-                    name: "Suspected Sepsis",
-                    type: "area",
-                    data: suspectedData,
-                    color: "rgba(196, 127, 16, 0.95)",
-                    fillColor: "rgba(196, 127, 16, 0.22)",
-                    lineWidth: selectedMetric === "SepsisWarning" ? 2 : 0,
-                    zIndex: selectedMetric === "SepsisWarning" ? 7 : 1,
-                    step: "left"
-                },
-                {
-                    name: "Confirmed Sepsis",
-                    type: "area",
-                    data: confirmedData,
-                    color: "rgba(194, 65, 75, 0.95)",
-                    fillColor: "rgba(194, 65, 75, 0.25)",
-                    lineWidth: selectedMetric === "SepsisConfirmed" ? 2 : 0,
-                    zIndex: selectedMetric === "SepsisConfirmed" ? 7 : 1,
-                    step: "left"
-                }
-            ];
+            return {
+                trueSepsisBands: buildTrueSepsisBands(trueLabels, iculosValues),
+                series: [
+                    {
+                        name: "Sepsis Probability",
+                        type: "spline",
+                        kind: "probability",
+                        data: probabilityData,
+                        color: "#0ea5b7",
+                        lineWidth: selectedMetric === "SepsisProb" ? 5 : 3,
+                        zIndex: selectedMetric === "SepsisProb" ? 8 : 4,
+                        tooltip: { valueDecimals: 3 }
+                    },
+                    {
+                        name: "True Sepsis (dataset)",
+                        type: "scatter",
+                        kind: "actual",
+                        data: actualSepsisData,
+                        color: "#dc2626",
+                        zIndex: selectedMetric === "SepsisLabel" ? 10 : 7,
+                        marker: {
+                            symbol: "square",
+                            radius: selectedMetric === "SepsisLabel" ? 6 : 4,
+                            lineWidth: 1,
+                            lineColor: "#991b1b"
+                        }
+                    },
+                    {
+                        name: "Suspected Alert",
+                        type: "scatter",
+                        kind: "suspected",
+                        data: suspectedMarkers,
+                        color: "#c47f10",
+                        zIndex: selectedMetric === "SepsisWarning" ? 9 : 6,
+                        marker: {
+                            symbol: "triangle",
+                            radius: selectedMetric === "SepsisWarning" ? 6 : 4,
+                            lineWidth: 1,
+                            lineColor: "#92400e"
+                        }
+                    },
+                    {
+                        name: "Confirmed Alert",
+                        type: "scatter",
+                        kind: "confirmed",
+                        data: confirmedMarkers,
+                        color: "#be123c",
+                        zIndex: selectedMetric === "SepsisConfirmed" ? 9 : 6,
+                        marker: {
+                            symbol: "diamond",
+                            radius: selectedMetric === "SepsisConfirmed" ? 6 : 4,
+                            lineWidth: 1,
+                            lineColor: "#881337"
+                        }
+                    }
+                ]
+            };
         }
 
         function baseChartConfig(series, yAxisOverride = {}) {
@@ -1648,24 +1708,49 @@
 
             let chartConfig;
             if (view.special === "sepsis") {
-                chartConfig = baseChartConfig(buildSepsisSeries(data, iculosValues), {
-                    min: -0.05,
-                    max: 1.05,
+                const sepsisChart = buildSepsisSeries(data, iculosValues);
+                chartConfig = baseChartConfig(sepsisChart.series, {
+                    min: 0,
+                    max: 1.12,
                     tickInterval: 0.25,
-                    title: { text: "Probability / Status" },
+                    title: { text: "Probability" },
+                    plotLines: [{
+                        value: SEPSIS_THRESHOLD,
+                        color: "#f59e0b",
+                        dashStyle: "ShortDash",
+                        width: 2,
+                        zIndex: 5,
+                        label: {
+                            text: `Threshold ${SEPSIS_THRESHOLD.toFixed(2)}`,
+                            align: "right",
+                            x: -8,
+                            y: -6,
+                            style: {
+                                color: "#92400e",
+                                fontWeight: "700"
+                            }
+                        }
+                    }],
                     labels: {
                         formatter: function() {
-                            if (this.value === 1) return "Yes";
-                            if (this.value === 0) return "No";
-                            return this.value;
+                            if (this.value > 1) return "";
+                            return `${Math.round(this.value * 100)}%`;
                         }
                     }
                 });
                 chartConfig.chart.type = "line";
+                chartConfig.xAxis.plotBands = sepsisChart.trueSepsisBands;
                 chartConfig.tooltip.formatter = function() {
                     let s = `<b>ICU Hour: ${this.x}</b><br/>`;
                     this.points.forEach(point => {
-                        const value = point.series.name.includes("Probability") ? point.y.toFixed(3) : (point.y === 1 ? "Yes" : "No");
+                        let value;
+                        if (point.series.userOptions.kind === "probability") {
+                            value = point.y.toFixed(3);
+                        } else if (point.series.userOptions.kind === "actual") {
+                            value = "SepsisLabel = 1";
+                        } else {
+                            value = "Active";
+                        }
                         s += `<span style="color:${point.color}">\u25CF</span> ${point.series.name}: <b>${value}</b><br/>`;
                     });
                     return s;

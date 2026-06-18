@@ -348,7 +348,7 @@ def process_patient_state(key: Tuple[str], pdfs: Iterable[pd.DataFrame], state: 
 spark = SparkSession.builder \
     .appName("KafkaToCassandraWithModel") \
     .config("spark.cassandra.connection.host", "cassandra") \
-    .config("spark.sql.streaming.checkpointLocation", "hdfs://namenode:9000/spark/checkpoints") \
+    .config("spark.sql.streaming.checkpointLocation", "hdfs://namenode:9000/spark/checkpoints_v3") \
     .config("spark.sql.execution.arrow.pyspark.enabled", "true") \
     .getOrCreate()
 
@@ -396,14 +396,14 @@ query_cassandra = output_df.writeStream \
     .format("org.apache.spark.sql.cassandra") \
     .option("keyspace", "sepsis_monitoring") \
     .option("table", "icu_readings") \
-    .option("checkpointLocation", "hdfs://namenode:9000/spark/checkpoints_cassandra") \
+    .option("checkpointLocation", "hdfs://namenode:9000/spark/checkpoints_v3_cassandra") \
     .outputMode("append") \
     .start()
 
 query_hdfs = output_df.writeStream \
     .format("parquet") \
     .option("path", "hdfs://namenode:9000/data/processed_parquet") \
-    .option("checkpointLocation", "hdfs://namenode:9000/spark/checkpoints_hdfs") \
+    .option("checkpointLocation", "hdfs://namenode:9000/spark/checkpoints_v3_hdfs") \
     .partitionBy("patient_id") \
     .outputMode("append") \
     .start()

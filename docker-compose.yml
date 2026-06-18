@@ -9,6 +9,8 @@ services:
       - CLUSTER_NAME=sepsis_cluster
       - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
       - HDFS_CONF_dfs_replication=1
+    volumes:
+      - namenode-data:/hadoop/dfs/name
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9870/"]
       interval: 10s
@@ -21,6 +23,8 @@ services:
     environment:
       - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
       - HDFS_CONF_dfs_replication=1
+    volumes:
+      - datanode-data:/hadoop/dfs/data
     depends_on:
       namenode:
         condition: service_healthy
@@ -184,6 +188,8 @@ services:
       - POSTGRES_USER=airflow
       - POSTGRES_PASSWORD=airflow
       - POSTGRES_DB=airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 5s
@@ -232,8 +238,8 @@ services:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
-      retries: 10
-      start_period: 60s
+      retries: 15
+      start_period: 120s
 
   airflow-scheduler:
     build:
@@ -374,3 +380,6 @@ volumes:
   spark-checkpoints:
   mlflow-artifacts:
   cassandra-data:
+  postgres-data:
+  namenode-data:
+  datanode-data:

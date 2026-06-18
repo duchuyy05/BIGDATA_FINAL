@@ -177,6 +177,9 @@ def get_data_files(data_dirs, max_files=None, hdfs_client=None):
 def compute_statistics(files, hdfs_client=None):
     print(f"Computing dynamic statistics on {len(files)} files...")
     all_x = []
+    pos_count = 0
+    neg_count = 0
+    
     for f in files:
         if hdfs_client:
             with hdfs_client.read(f) as reader:
@@ -185,6 +188,11 @@ def compute_statistics(files, hdfs_client=None):
             df = pd.read_csv(f, sep='|')
         x_raw = df[feature_order].values
         valid = (df['SepsisLabel'].values >= 0)
+        
+        y_valid = df['SepsisLabel'].values[valid]
+        pos_count += np.sum(y_valid == 1)
+        neg_count += np.sum(y_valid == 0)
+        
         if np.sum(valid) > 0:
             all_x.append(x_raw[valid])
     
@@ -209,11 +217,14 @@ def compute_statistics(files, hdfs_client=None):
     varmeans[np.isnan(varmeans)] = 0
     varlogmeans[np.isnan(varlogmeans)] = 0
 
+    scale_pos_weight = float(neg_count / max(pos_count, 1.0)) if pos_count > 0 else 40.0
+
     return {
         "varmeans": varmeans.tolist(),
         "varstds": varstds.tolist(),
         "varlogmeans": varlogmeans.tolist(),
-        "varlogstds": varlogstds.tolist()
+        "varlogstds": varlogstds.tolist(),
+        "scale_pos_weight": scale_pos_weight
     }
 
 
@@ -362,7 +373,6 @@ if __name__ == "__main__":
             exit(0)
             
         print(f"Found {len(new_files)} new files. Sampling {args.sampling_ratio*100}% of {len(old_files)} old files...")
-        import random
         k = int(len(old_files) * args.sampling_ratio)
         sampled_old_files = random.sample(old_files, k)
         
@@ -373,20 +383,32 @@ if __name__ == "__main__":
         
     print(f"Total files selected for training: {len(files_to_train)}")
     
+    import random
+    random.seed(42)
+    random.shuffle(files_to_train)
+    print("Shuffled files_to_train to ensure uniform distribution across chunks.")
+    
     # 1. Compute and save Scaler Params (This uses minimal RAM for statistics)
     scaler_params = compute_statistics(files_to_train, hdfs_client)
     with open("scaler.json", "w") as f:
         json.dump(scaler_params, f)
         
+    dynamic_scale_pos_weight = scaler_params.get("scale_pos_weight", 40.0)
+    print(f"Dynamic scale_pos_weight: {dynamic_scale_pos_weight:.2f}")
+
     params = {
         "objective": "binary:logistic",
-        "eval_metric": ["logloss", "aucpr"],
-        "eta": 0.1,
-        "max_depth": 4,
+        "eval_metric": ["logloss", "aucpr", "auc"],
+        "eta": 0.05,            # Tăng learning rate một chút (0.035 -> 0.05)
+        "max_depth": 6,         # Tăng độ sâu cây để học được tương tác phức tạp hơn (4 -> 6)
+        "min_child_weight": 3,  # Giảm xuống 3 để mô hình nhạy bén hơn với các trường hợp hiếm
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "scale_pos_weight": 40,
+        "lambda": 3.0,          # Tăng L2 Regularization để chống overfitting khi max_depth tăng
+        "alpha": 0.5,           # Tăng L1 Regularization
+        "scale_pos_weight": dynamic_scale_pos_weight,
         "tree_method": "hist",
+        "max_bin": 256,
         "seed": 42,
         "nthread": 4
     }
@@ -399,11 +421,13 @@ if __name__ == "__main__":
         
         # 2. Chunk-based Training Loop
         final_model = None
+        best_aucpr = 0.0
         chunk_size = args.chunk_size
         
         print(f"Starting chunked training (Chunk Size: {chunk_size} files)...")
         import gc
-        dval_global = None
+        X_val_global_list = []
+        y_val_global_list = []
         
         for i in range(0, len(files_to_train), chunk_size):
             chunk_files = files_to_train[i:i+chunk_size]
@@ -415,48 +439,77 @@ if __name__ == "__main__":
             if X_chunk.shape[0] == 0:
                 continue
                 
-            if dval_global is None:
-                # First chunk: split to create a global validation set
-                X_train, X_val, y_train, y_val = train_test_split(X_chunk, y_chunk, test_size=0.2, random_state=42, stratify=y_chunk)
-                dval_global = xgb.DMatrix(X_val, label=y_val)
-                dtrain = xgb.DMatrix(X_train, label=y_train)
-                del X_chunk, y_chunk, X_train, X_val, y_train, y_val
-            else:
-                # Subsequent chunks: use 100% of the chunk for training
-                dtrain = xgb.DMatrix(X_chunk, label=y_chunk)
-                del X_chunk, y_chunk
-                
+            # Split 90% train, 10% val for every chunk
+            X_train, X_val_chunk, y_train, y_val_chunk = train_test_split(
+                X_chunk, y_chunk, test_size=0.1, random_state=42, stratify=y_chunk
+            )
+            
+            X_val_global_list.append(X_val_chunk)
+            y_val_global_list.append(y_val_chunk)
+            
+            # Recreate global validation set encompassing ALL chunks seen so far
+            X_val_global = np.vstack(X_val_global_list)
+            y_val_global = np.concatenate(y_val_global_list)
+            dval_global = xgb.DMatrix(X_val_global, label=y_val_global)
+            
+            dtrain = xgb.DMatrix(X_train, label=y_train)
+            
+            del X_chunk, y_chunk, X_train, X_val_chunk, y_train, y_val_chunk, X_val_global, y_val_global
             gc.collect()
             
             if final_model is None:
-                # First chunk: use early stopping to find a good initial structure
                 print("First chunk: Training initial model with Early Stopping...")
+                evals_result = {}
                 final_model = xgb.train(
                     params=params,
                     dtrain=dtrain,
-                    num_boost_round=100,
+                    num_boost_round=150,
                     evals=[(dtrain, "train"), (dval_global, "val")],
                     verbose_eval=10,
-                    early_stopping_rounds=10
+                    early_stopping_rounds=10,
+                    evals_result=evals_result
                 )
                 print(f"Best iteration for initial model: {final_model.best_iteration}")
+                best_aucpr = max(evals_result['val']['aucpr'])
+                print(f"Initial chunk AUCPR: {best_aucpr:.4f}")
                 mlflow.log_metric("initial_best_iteration", final_model.best_iteration)
             else:
-                # Subsequent chunks: incremental training (update trees)
-                print("Incremental training on new chunk with lower learning rate...")
+                print("Evaluating current model on NEW global validation set to get baseline AUCPR...")
+                baseline_preds = final_model.predict(dval_global)
+                from sklearn.metrics import average_precision_score
+                # XGBoost doesn't return a single metric directly, compute AUCPR via sklearn
+                baseline_aucpr = average_precision_score(dval_global.get_label(), baseline_preds)
+                print(f"Baseline AUCPR before training this chunk: {baseline_aucpr:.4f}")
+
+                print("Incremental training on new chunk...")
                 params_inc = params.copy()
-                params_inc["eta"] = 0.05 # Lower learning rate to avoid destroying existing trees
-                final_model = xgb.train(
+                params_inc["eta"] = 0.01 # Lower learning rate to avoid destroying existing trees
+                evals_result = {}
+                new_model = xgb.train(
                     params=params_inc,
                     dtrain=dtrain,
-                    num_boost_round=20, # Add 20 rounds per chunk to prevent exploding tree count
+                    num_boost_round=20,
                     evals=[(dtrain, "train"), (dval_global, "val")],
                     xgb_model=final_model,
-                    verbose_eval=10
+                    early_stopping_rounds=5, # Stop if adding new trees degrades validation
+                    verbose_eval=10,
+                    evals_result=evals_result
                 )
                 
+                # Best iteration might be from previous trees if the new trees immediately degrade performance
+                # But evals_result contains the scores for the new boosting rounds.
+                new_aucpr = max(evals_result['val']['aucpr'])
+                
+                # Check for catastrophic forgetting against the baseline we just established
+                if new_aucpr < baseline_aucpr - 0.01: # 1% drop threshold relative to current baseline
+                    print(f"WARNING: AUCPR dropped from {baseline_aucpr:.4f} to {new_aucpr:.4f}.")
+                    print("Rejecting this chunk to prevent Catastrophic Forgetting!")
+                else:
+                    print(f"Accepting chunk. New AUCPR: {new_aucpr:.4f} (Baseline was {baseline_aucpr:.4f})")
+                    final_model = new_model
+                    
             # Free DMatrices
-            del dtrain
+            del dtrain, dval_global
             gc.collect()
 
         # 3. Chunk-based Evaluation Loop (Prediction only)

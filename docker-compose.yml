@@ -118,23 +118,6 @@ services:
         exit 0
       "
 
-  data-prep:
-    image: python:3.10-slim
-    container_name: data-prep
-    working_dir: /workspace
-    environment:
-      - USE_X_PATIENTS=${USE_X_PATIENTS:-false}
-      - X_PATIENTS=${X_PATIENTS:-100}
-      - MAX_PATIENTS=${MAX_PATIENTS:-100}
-      - DELAY=${DELAY:-2}
-      - ACTIVE_DATA_DIR=${ACTIVE_DATA_DIR:-/data/active}
-      - SAMPLE_DATA_DIR=/data/sample
-      - DEMO_PATIENT_IDS=${DEMO_PATIENT_IDS:-}
-    volumes:
-      - ./data:/data
-      - ./scripts:/scripts:ro
-    command: python /scripts/prepare_demo_data.py
-
   nifi:
     image: apache/nifi:latest
     container_name: nifi
@@ -158,8 +141,6 @@ services:
     build: ./nifi
     container_name: nifi-setup
     depends_on:
-      data-prep:
-        condition: service_completed_successfully
       nifi:
         condition: service_healthy
       kafka:
@@ -181,12 +162,13 @@ services:
     ports:
       - "5001:5001"
     command: >
+      sh -c "chmod 777 /mlflow/artifacts &&
       mlflow server
       --host 0.0.0.0
       --port 5001
       --backend-store-uri sqlite:///mlflow.db
       --default-artifact-root /mlflow/artifacts
-      --serve-artifacts
+      --serve-artifacts"
     volumes:
       - mlflow-artifacts:/mlflow/artifacts
     healthcheck:
@@ -248,9 +230,10 @@ services:
     command: webserver
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 10s
+      interval: 30s
       timeout: 10s
-      retries: 5
+      retries: 10
+      start_period: 60s
 
   airflow-scheduler:
     build:
@@ -374,8 +357,6 @@ services:
     volumes:
       - ./data:/data:ro
     depends_on:
-      data-prep:
-        condition: service_completed_successfully
       cassandra-init:  
         condition: service_completed_successfully
 
@@ -392,3 +373,4 @@ services:
 volumes:
   spark-checkpoints:
   mlflow-artifacts:
+  cassandra-data:

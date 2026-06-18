@@ -40,7 +40,7 @@ def get_patient_data_from_hdfs(patient_id):
 
 CASSANDRA_HOST = os.getenv('CASSANDRA_HOST', 'cassandra')
 KEYSPACE = 'sepsis_monitoring'
-DATA_DIR = Path(os.getenv('DATA_DIR', '/data/active'))
+DATA_DIR = Path(os.getenv('DATA_DIR', '/data/live_data'))
 DEFAULT_PATIENT_IDS = ["p000001"]
 
 try:
@@ -105,17 +105,18 @@ def patient_ids_from_manifest(manifest):
 
 
 def discover_patient_ids():
+    max_patients = int(os.getenv("MAX_PATIENTS", os.getenv("X_PATIENTS", "100")))
+    
     manifest_ids = patient_ids_from_manifest(load_patient_manifest())
     if manifest_ids:
-        return manifest_ids
+        return manifest_ids[:max_patients]
 
     configured_ids = env_patient_ids()
     if configured_ids and not truthy(os.getenv("USE_X_PATIENTS")):
-        return configured_ids
+        return configured_ids[:max_patients]
 
     if DATA_DIR.exists():
         files = sorted(DATA_DIR.glob("*.psv"))
-        max_patients = int(os.getenv("MAX_PATIENTS", os.getenv("X_PATIENTS", "10")))
         discovered = [path.stem for path in files[:max_patients]]
         if discovered:
             return discovered
@@ -234,6 +235,17 @@ def query_patient():
     if len(timestamps) == 0:
         print(f"No data in Cassandra for {patient_id}. Querying HDFS Parquet...")
         df = get_patient_data_from_hdfs(patient_id)
+        if df is None or df.empty:
+            print(f"No data in HDFS for {patient_id}. Falling back to live_data...")
+            local_path = DATA_DIR / f"{patient_id}.psv"
+            if local_path.exists():
+                df = pd.read_csv(local_path, sep='|')
+                # Fake event_time because live_data doesn't have it (just ICULOS)
+                # We can generate fake times based on ICULOS or just use current time
+                import datetime
+                base_time = datetime.datetime.now() - datetime.timedelta(hours=len(df))
+                df['event_time'] = [base_time + datetime.timedelta(hours=i) for i in range(len(df))]
+        
         if df is not None and not df.empty:
             df = df.sort_values('ICULOS')
             for _, row in df.iterrows():

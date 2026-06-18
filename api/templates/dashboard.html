@@ -697,7 +697,12 @@
         <section class="controls">
             <div class="field">
                 <label for="patientSelect">Patient ID</label>
-                <input type="text" id="patientSelect" value="{{ patient_ids[0] }}" placeholder="p000001">
+                <input type="text" id="patientSelect" value="{{ patient_ids[0] }}" placeholder="p000001" list="patientList">
+                <datalist id="patientList">
+                    {% for pid in patient_ids %}
+                    <option value="{{ pid }}">
+                    {% endfor %}
+                </datalist>
             </div>
             <button class="action-button" onclick="changePatient()">Apply</button>
             <div class="field">
@@ -718,9 +723,12 @@
                 <strong>{{ demo_mode }}</strong>
             </div>
             <div class="patient-chip-list" id="patientChips" aria-label="Demo patient IDs">
-                {% for pid in patient_ids %}
+                {% for pid in patient_ids[:30] %}
                 <button class="patient-chip{% if loop.first %} active{% endif %}" type="button" data-patient="{{ pid }}">{{ pid }}</button>
                 {% endfor %}
+                {% if patient_ids|length > 30 %}
+                <button class="patient-chip" type="button" disabled style="background: transparent; border-color: transparent; cursor: default;">+ {{ patient_ids|length - 30 }} more (Use Search)</button>
+                {% endif %}
             </div>
         </section>
 
@@ -777,9 +785,19 @@
         </main>
     </div>
 
+    <script id="patient-data" type="application/json">
+        {{ patient_ids|tojson }}
+    </script>
+    <script id="demo-mode-data" type="application/json">
+        {{ demo_mode|tojson }}
+    </script>
+    <script id="sepsis-threshold-data" type="application/json">
+        {{ sepsis_threshold|tojson }}
+    </script>
+
     <script>
-        const patientIds = {{ patient_ids|tojson }};
-        const demoMode = {{ demo_mode|tojson }};
+        const patientIds = JSON.parse(document.getElementById('patient-data').textContent);
+        const demoMode = JSON.parse(document.getElementById('demo-mode-data').textContent);
         let currentPatient = patientIds[0] || "p000001";
         let lastDataKey = "";
         let fullPatientData = null;
@@ -791,7 +809,7 @@
         let activeViewRendered = null;
         let latestData = null;
         let selectedMetric = null;
-        const SEPSIS_THRESHOLD = Number({{ sepsis_threshold|tojson }});
+        const SEPSIS_THRESHOLD = Number(JSON.parse(document.getElementById('sepsis-threshold-data').textContent));
 
         const GROUPS = {
             vitals: new Set(["HR", "O2Sat", "SBP", "MAP", "DBP"]),
@@ -1830,11 +1848,20 @@
             }
         }
 
+        let fetchController = null;
+
         async function fetchData() {
             if (isSimulating) return;
 
+            if (fetchController) {
+                fetchController.abort();
+            }
+            fetchController = new AbortController();
+
             try {
-                const res = await fetch(`/query?patient_id=${encodeURIComponent(currentPatient)}`);
+                const res = await fetch(`/query?patient_id=${encodeURIComponent(currentPatient)}`, {
+                    signal: fetchController.signal
+                });
                 const data = await res.json();
                 const iculosValues = getIcuHours(data);
                 const currentDataKey = `${currentPatient}_${iculosValues.length}_${activeView}`;
@@ -1843,7 +1870,9 @@
                 lastDataKey = currentDataKey;
                 renderCharts(data);
             } catch (error) {
-                console.error("Error fetching data:", error);
+                if (error.name !== 'AbortError') {
+                    console.error("Error fetching data:", error);
+                }
             }
         }
 

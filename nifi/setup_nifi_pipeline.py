@@ -8,6 +8,7 @@ import time
 import sys
 import argparse
 import urllib3
+import os
 
 # Tắt cảnh báo SSL cho self-signed cert
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -23,9 +24,22 @@ PSV_HEADER = [
     "HospAdmTime", "ICULOS", "SepsisLabel"
 ]
 
-KAFKA_BROKER = "kafka:9092"
-KAFKA_TOPIC = "icu_data"
-DATA_DIRS = ["/data"]
+def split_env_list(value, default):
+    items = [item.strip() for item in str(value or "").split(",") if item.strip()]
+    return items or default
+
+
+def schedule_period():
+    raw = os.getenv("NIFI_LIST_INTERVAL", os.getenv("DELAY", "2")).strip()
+    if raw.endswith(("sec", "secs", "second", "seconds", "min", "mins", "minute", "minutes")):
+        return raw
+    return f"{raw} sec"
+
+
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "icu_data")
+DATA_DIRS = split_env_list(os.getenv("NIFI_DATA_DIRS"), ["/data/active"])
+LIST_SCHEDULE_PERIOD = schedule_period()
 
 
 class NiFiPipelineSetup:
@@ -277,7 +291,7 @@ class NiFiPipelineSetup:
                     "File Filter": ".*\.psv",
                     "Recurse Subdirectories": "true"
                 },
-                "schedulingPeriod": "10 sec",
+                "schedulingPeriod": LIST_SCHEDULE_PERIOD,
                 "schedulingStrategy": "TIMER_DRIVEN"
             }
         )

@@ -9,6 +9,8 @@ import mlflow.xgboost
 import argparse
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc, roc_auc_score, average_precision_score, accuracy_score, f1_score
+from sklearn.model_selection import train_test_split
+from hdfs import InsecureClient
 
 LOG_INDICES = {14,15,16,19,20,22,25,26,27,30,31,32}
 
@@ -154,17 +156,33 @@ def find_optimal_threshold(all_probs, all_trues, thresholds=np.arange(0.01, 0.91
 # -----------------------------------------------------------------------------
 # Dynamic Statistics & Preprocessing
 # -----------------------------------------------------------------------------
-def compute_statistics(data_dirs, max_files=None):
-    print("Computing dynamic statistics...")
+def get_data_files(data_dirs, max_files=None, hdfs_client=None):
     files = []
-    for d in data_dirs:
-        files.extend(glob.glob(os.path.join(d, "*.psv")))
+    if hdfs_client:
+        for d in data_dirs:
+            try:
+                for f in hdfs_client.list(d):
+                    if f.endswith(".psv"):
+                        files.append(os.path.join(d, f))
+            except Exception as e:
+                print(f"Could not list HDFS directory {d}: {e}")
+    else:
+        for d in data_dirs:
+            files.extend(glob.glob(os.path.join(d, "*.psv")))
+            
     if max_files and len(files) > max_files:
         files = files[:max_files]
+    return files
 
+def compute_statistics(files, hdfs_client=None):
+    print(f"Computing dynamic statistics on {len(files)} files...")
     all_x = []
     for f in files:
-        df = pd.read_csv(f, sep='|')
+        if hdfs_client:
+            with hdfs_client.read(f) as reader:
+                df = pd.read_csv(reader, sep='|')
+        else:
+            df = pd.read_csv(f, sep='|')
         x_raw = df[feature_order].values
         valid = (df['SepsisLabel'].values >= 0)
         if np.sum(valid) > 0:
@@ -200,7 +218,7 @@ def compute_statistics(data_dirs, max_files=None):
 
 
 def preprocess(raw_data, scaler_params):
-    data = np.copy(raw_data)
+    data = np.copy(raw_data).astype(np.float32)
     T, F = data.shape
     
     varmeans = np.array(scaler_params["varmeans"])
@@ -232,38 +250,30 @@ def preprocess(raw_data, scaler_params):
         else:
             data[:, i] = 10 * (data[:, i] - varmeans[i]) / varstds[i]
 
-    return np.concatenate([data, delta, mask.astype(float)], axis=1)
+    return np.concatenate([data, delta, mask.astype(np.float32)], axis=1)
 
 def build_windows(data_120):
     T, D = data_120.shape
-    X_out = []
-    for t in range(T):
-        row = []
-        for j in range(6):
-            idx = t - j
-            if idx < 0:
-                row.extend([0]*D)
-            else:
-                row.extend(data_120[idx])
-        X_out.append(row)
-    return np.array(X_out)
+    padded = np.vstack([np.zeros((5, D), dtype=np.float32), data_120.astype(np.float32)])
+    X_out = np.zeros((T, 6 * D), dtype=np.float32)
+    for j in range(6):
+        X_out[:, j*D : (j+1)*D] = padded[5-j : 5-j+T]
+    return X_out
 
 
-def load_psv_files(data_dirs, scaler_params, max_files=None):
-    files = []
-    for d in data_dirs:
-        files.extend(glob.glob(os.path.join(d, "*.psv")))
-    if max_files and len(files) > max_files:
-        files = files[:max_files]
-        
+def load_psv_files(files, scaler_params, hdfs_client=None):
     print(f"Loading {len(files)} files for training...")
     
     X_list, y_list, y_grouped = [], [], []
     
     for f in files:
-        df = pd.read_csv(f, sep='|')
-        y_raw = df['SepsisLabel'].values
-        x_raw = df[feature_order].values
+        if hdfs_client:
+            with hdfs_client.read(f) as reader:
+                df = pd.read_csv(reader, sep='|')
+        else:
+            df = pd.read_csv(f, sep='|')
+        y_raw = df['SepsisLabel'].values.astype(np.float32)
+        x_raw = df[feature_order].values.astype(np.float32)
         
         valid = (y_raw >= 0)
         x_raw = x_raw[valid]
@@ -279,10 +289,10 @@ def load_psv_files(data_dirs, scaler_params, max_files=None):
         y_list.append(y_raw)
         y_grouped.append(y_raw) # Keep grouped for evaluation
 
-    X = np.vstack(X_list).astype(np.float32)
-    y = np.hstack(y_list).astype(np.float32)
+    X = np.vstack(X_list)
+    y = np.hstack(y_list)
     
-    return X, y, X_list, y_grouped
+    return X, y, y_grouped
 
 
 if __name__ == "__main__":
@@ -290,24 +300,84 @@ if __name__ == "__main__":
     parser.add_argument("--data-dirs", type=str, required=True, help="Comma separated list of data directories")
     parser.add_argument("--max-files", type=int, default=None, help="Maximum number of files to process")
     parser.add_argument("--mlflow-uri", type=str, default="http://mlflow:5001", help="MLflow Tracking URI")
+    parser.add_argument("--hdfs-uri", type=str, default="http://namenode:9870", help="HDFS URI")
+    parser.add_argument("--threshold", type=int, default=500, help="Minimum new files to trigger training")
+    parser.add_argument("--sampling-ratio", type=float, default=0.2, help="Ratio of old files to keep")
+    
+    parser.add_argument("--chunk-size", type=int, default=5000, help="Number of files to process per chunk")
     
     args = parser.parse_args()
     data_dirs = args.data_dirs.split(",")
     
-    # 1. Compute and save Scaler Params
-    scaler_params = compute_statistics(data_dirs, args.max_files)
-    with open("scaler.json", "w") as f:
-        json.dump(scaler_params, f)
+    hdfs_client = None
+    if not os.path.exists(data_dirs[0]):
+        try:
+            client = InsecureClient(args.hdfs_uri, user='root')
+            client.status('/')
+            hdfs_client = client
+            print(f"Connected to HDFS at {args.hdfs_uri}")
+        except Exception as e:
+            print(f"HDFS not available, using local file system: {e}")
+    else:
+        print(f"Local data directories found. Reading directly from disk to accelerate training.")
         
-    # 2. Load Data
-    X, y, X_grouped, y_grouped = load_psv_files(data_dirs, scaler_params, args.max_files)
-    print("Training shape:", X.shape, y.shape)
+    files = get_data_files(data_dirs, args.max_files, hdfs_client)
+    dataset_size = len(files)
     
-    # 3. Train
+    if dataset_size == 0:
+        print("No data files found. Exiting.")
+        exit(0)
+
     mlflow.set_tracking_uri(args.mlflow_uri)
     mlflow.set_experiment("sepsis_prediction")
     
-    dtrain = xgb.DMatrix(X, label=y)
+    # -----------------------------
+    # CT Sampling Logic
+    # -----------------------------
+    client = mlflow.tracking.MlflowClient(args.mlflow_uri)
+    experiment = client.get_experiment_by_name("sepsis_prediction")
+    
+    old_files = []
+    if experiment:
+        runs = client.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            order_by=["start_time DESC"]
+        )
+        for r in runs:
+            if r.info.status == "FINISHED":
+                try:
+                    local_path = client.download_artifacts(r.info.run_id, "trained_files.json", "/tmp")
+                    with open(local_path, "r") as f:
+                        old_files = json.load(f)
+                    break
+                except Exception:
+                    continue
+                    
+    old_files_set = set(old_files)
+    new_files = [f for f in files if f not in old_files_set]
+    
+    if len(old_files) > 0:
+        if len(new_files) < args.threshold:
+            print(f"Only {len(new_files)} new files found (Threshold: {args.threshold}). Skipping training.")
+            exit(0)
+            
+        print(f"Found {len(new_files)} new files. Sampling {args.sampling_ratio*100}% of {len(old_files)} old files...")
+        import random
+        k = int(len(old_files) * args.sampling_ratio)
+        sampled_old_files = random.sample(old_files, k)
+        
+        files_to_train = sampled_old_files + new_files
+    else:
+        print("No previous trained_files.json found. Fresh start: Training on all data.")
+        files_to_train = files
+        
+    print(f"Total files selected for training: {len(files_to_train)}")
+    
+    # 1. Compute and save Scaler Params (This uses minimal RAM for statistics)
+    scaler_params = compute_statistics(files_to_train, hdfs_client)
+    with open("scaler.json", "w") as f:
+        json.dump(scaler_params, f)
+        
     params = {
         "objective": "binary:logistic",
         "eval_metric": ["logloss", "aucpr"],
@@ -318,30 +388,107 @@ if __name__ == "__main__":
         "scale_pos_weight": 40,
         "tree_method": "hist",
         "seed": 42,
+        "nthread": 4
     }
 
     with mlflow.start_run() as run:
         mlflow.log_params(params)
-        mlflow.log_artifact("scaler.json") # Log scaler globally
+        mlflow.log_param("dataset_size", dataset_size)
+        mlflow.log_param("chunk_size", args.chunk_size)
+        mlflow.log_artifact("scaler.json")
         
-        model = xgb.train(
-            params=params,
-            dtrain=dtrain,
-            num_boost_round=50,
-            evals=[(dtrain, "train")],
-            verbose_eval=10,
-            early_stopping_rounds=10
-        )
+        # 2. Chunk-based Training Loop
+        final_model = None
+        chunk_size = args.chunk_size
         
-        # 4. Evaluate and find Optimal Threshold
-        print("Evaluating to find optimal threshold...")
-        all_probs = []
-        for X_win in X_grouped:
-            dtest = xgb.DMatrix(X_win.astype(np.float32))
-            probs = model.predict(dtest)
-            all_probs.append(probs)
+        print(f"Starting chunked training (Chunk Size: {chunk_size} files)...")
+        import gc
+        dval_global = None
+        
+        for i in range(0, len(files_to_train), chunk_size):
+            chunk_files = files_to_train[i:i+chunk_size]
+            print(f"\n--- Training Chunk {i//chunk_size + 1} (Files {i} to {i+len(chunk_files)-1}) ---")
             
-        best_threshold, best_utility = find_optimal_threshold(all_probs, y_grouped)
+            X_chunk, y_chunk, _ = load_psv_files(chunk_files, scaler_params, hdfs_client)
+            print(f"Chunk shape: {X_chunk.shape}, {y_chunk.shape}")
+            
+            if X_chunk.shape[0] == 0:
+                continue
+                
+            if dval_global is None:
+                # First chunk: split to create a global validation set
+                X_train, X_val, y_train, y_val = train_test_split(X_chunk, y_chunk, test_size=0.2, random_state=42, stratify=y_chunk)
+                dval_global = xgb.DMatrix(X_val, label=y_val)
+                dtrain = xgb.DMatrix(X_train, label=y_train)
+                del X_chunk, y_chunk, X_train, X_val, y_train, y_val
+            else:
+                # Subsequent chunks: use 100% of the chunk for training
+                dtrain = xgb.DMatrix(X_chunk, label=y_chunk)
+                del X_chunk, y_chunk
+                
+            gc.collect()
+            
+            if final_model is None:
+                # First chunk: use early stopping to find a good initial structure
+                print("First chunk: Training initial model with Early Stopping...")
+                final_model = xgb.train(
+                    params=params,
+                    dtrain=dtrain,
+                    num_boost_round=100,
+                    evals=[(dtrain, "train"), (dval_global, "val")],
+                    verbose_eval=10,
+                    early_stopping_rounds=10
+                )
+                print(f"Best iteration for initial model: {final_model.best_iteration}")
+                mlflow.log_metric("initial_best_iteration", final_model.best_iteration)
+            else:
+                # Subsequent chunks: incremental training (update trees)
+                print("Incremental training on new chunk with lower learning rate...")
+                params_inc = params.copy()
+                params_inc["eta"] = 0.05 # Lower learning rate to avoid destroying existing trees
+                final_model = xgb.train(
+                    params=params_inc,
+                    dtrain=dtrain,
+                    num_boost_round=20, # Add 20 rounds per chunk to prevent exploding tree count
+                    evals=[(dtrain, "train"), (dval_global, "val")],
+                    xgb_model=final_model,
+                    verbose_eval=10
+                )
+                
+            # Free DMatrices
+            del dtrain
+            gc.collect()
+
+        # 3. Chunk-based Evaluation Loop (Prediction only)
+        print("\nStarting chunked evaluation to find optimal threshold...")
+        all_probs = []
+        y_grouped_all = []
+        
+        for i in range(0, len(files_to_train), chunk_size):
+            chunk_files = files_to_train[i:i+chunk_size]
+            print(f"Evaluating Chunk {i//chunk_size + 1} (Files {i} to {i+len(chunk_files)-1})...")
+            
+            X_chunk, y_chunk, y_grouped_chunk = load_psv_files(chunk_files, scaler_params, hdfs_client)
+            if X_chunk.shape[0] == 0:
+                continue
+                
+            dfull_chunk = xgb.DMatrix(X_chunk)
+            probs_chunk = final_model.predict(dfull_chunk)
+            
+            idx = 0
+            for yg in y_grouped_chunk:
+                length = len(yg)
+                all_probs.append(probs_chunk[idx : idx + length])
+                idx += length
+                
+            y_grouped_all.extend(y_grouped_chunk)
+            
+            del X_chunk, y_chunk, y_grouped_chunk, dfull_chunk, probs_chunk
+            gc.collect()
+
+        # 4. Optimal Threshold
+        print("Calculating optimal threshold metrics on full dataset...")
+        best_threshold, best_utility = find_optimal_threshold(all_probs, y_grouped_all)
         
         print(f"Optimal Threshold: {best_threshold:.3f}")
         print(f"Best Normalized Utility: {best_utility:.5f}")
@@ -356,8 +503,13 @@ if __name__ == "__main__":
 
         # Log model
         mlflow.xgboost.log_model(
-            xgb_model=model,
+            xgb_model=final_model,
             artifact_path="model"
         )
+        
+        # Log all files seen so far as 'old files' for the next run
+        with open("trained_files.json", "w") as f:
+            json.dump(files, f)
+        mlflow.log_artifact("trained_files.json")
         
         print("Training complete and model logged to MLflow.")

@@ -3,7 +3,40 @@ import os
 import json
 from pathlib import Path
 from cassandra.cluster import Cluster
+import requests
+import pandas as pd
+from hdfs import InsecureClient
+import io
+
 app = Flask(__name__, template_folder='templates')
+
+HDFS_URL = os.getenv('HDFS_URL', 'http://namenode:9870')
+try:
+    hdfs_client = InsecureClient(HDFS_URL, user='root')
+except Exception:
+    hdfs_client = None
+
+def get_patient_data_from_hdfs(patient_id):
+    if not hdfs_client:
+        return None
+    try:
+        base_dir = f"/data/processed_parquet/patient_id={patient_id}"
+        files = hdfs_client.list(base_dir)
+        parquet_files = [f for f in files if f.endswith('.parquet')]
+        if not parquet_files:
+            return None
+        
+        dfs = []
+        for f in parquet_files:
+            with hdfs_client.read(f"{base_dir}/{f}") as reader:
+                dfs.append(pd.read_parquet(io.BytesIO(reader.read())))
+        if dfs:
+            df = pd.concat(dfs)
+            return df
+        return None
+    except Exception as e:
+        print(f"HDFS fallback error: {e}")
+        return None
 
 CASSANDRA_HOST = os.getenv('CASSANDRA_HOST', 'cassandra')
 KEYSPACE = 'sepsis_monitoring'
@@ -196,6 +229,26 @@ def query_patient():
                 result[field].append(int(value))
             else:
                 result[field].append(float(value))
+
+    # Nếu Cassandra bị rỗng (do quá TTL), fallback sang HDFS
+    if len(timestamps) == 0:
+        print(f"No data in Cassandra for {patient_id}. Querying HDFS Parquet...")
+        df = get_patient_data_from_hdfs(patient_id)
+        if df is not None and not df.empty:
+            df = df.sort_values('ICULOS')
+            for _, row in df.iterrows():
+                event_time_val = row.get('event_time')
+                if pd.isna(event_time_val): continue
+                ts = int(pd.to_datetime(event_time_val).timestamp() * 1000)
+                timestamps.append(ts)
+                for field in fields:
+                    value = row.get(field, None)
+                    if pd.isna(value):
+                        result[field].append(None)
+                    elif field == "SepsisLabel":
+                        result[field].append(int(value))
+                    else:
+                        result[field].append(float(value))
     
     # Chuyển sang format yêu cầu
     import math

@@ -287,8 +287,8 @@ class NiFiPipelineSetup:
             x=x_offset, y=y_offset,
             config={
                 "properties": {
-                    "Input Directory": data_dir,
-                    "File Filter": ".*\\.psv",
+                    "Input Directory": "/data/live_data",
+                    "File Filter": ".*\.psv",
                     "Recurse Subdirectories": "true"
                 },
                 "schedulingPeriod": LIST_SCHEDULE_PERIOD,
@@ -311,6 +311,26 @@ class NiFiPipelineSetup:
             auto_terminate=["not.found", "permission.denied", "failure"]
         )
         processor_ids.append(fetch_file["id"])
+
+        # PutHDFS - Lưu vào HDFS
+        has_hdfs = False
+        try:
+            put_hdfs = self.create_processor(
+                name=f"[{dir_name}] Put to HDFS",
+                proc_type="org.apache.nifi.processors.hadoop.PutHDFS",
+                x=x_offset + 400, y=y_offset + 300,
+                config={
+                    "properties": {
+                        "Directory": f"hdfs://namenode:9000/data/{dir_name}",
+                        "Conflict Resolution Strategy": "ignore"
+                    }
+                },
+                auto_terminate=["success", "failure"]
+            )
+            processor_ids.append(put_hdfs["id"])
+            has_hdfs = True
+        except Exception as e:
+            print(f"Bỏ qua PutHDFS do không tìm thấy processor (NiFi 2.0+): {e}")
 
         update_attr = self.create_processor(
             name=f"[{dir_name}] Extract Patient ID",
@@ -373,7 +393,12 @@ class NiFiPipelineSetup:
 
         print("\n  Tạo connections...")
         self.create_connection(list_file["id"], fetch_file["id"], ["success"])
+        # Branch 1: Kafka pipeline
         self.create_connection(fetch_file["id"], update_attr["id"], ["success"])
+        # Branch 2: HDFS pipeline
+        if has_hdfs:
+            self.create_connection(fetch_file["id"], put_hdfs["id"], ["success"])
+        
         self.create_connection(update_attr["id"], convert_record["id"], ["success"])
         self.create_connection(convert_record["id"], update_record["id"], ["success"])
         self.create_connection(update_record["id"], publish_kafka["id"], ["success"])

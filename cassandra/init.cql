@@ -50,4 +50,4 @@ CREATE TABLE IF NOT EXISTS sepsis_monitoring.icu_readings (
     "SepsisWarning" double,
     "SepsisConfirmed" double,
     PRIMARY KEY ("patient_id", "ICULOS")
-);
+) WITH default_time_to_live = 604800;

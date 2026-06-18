@@ -1,4 +1,48 @@
 services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    environment:
+      - CLUSTER_NAME=sepsis_cluster
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_CONF_dfs_replication=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_CONF_dfs_replication=1
+    depends_on:
+      namenode:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9864/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  hdfs-init:
+    image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
+    container_name: hdfs-init
+    depends_on:
+      datanode:
+        condition: service_healthy
+    volumes:
+      - ./data:/local_data
+      - ./init-hdfs.sh:/init-hdfs.sh
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    command: bash /init-hdfs.sh
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: zookeeper
@@ -141,22 +185,102 @@ services:
       --host 0.0.0.0
       --port 5001
       --backend-store-uri sqlite:///mlflow.db
+      --default-artifact-root /mlflow/artifacts
+      --serve-artifacts
+    volumes:
+      - mlflow-artifacts:/mlflow/artifacts
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/')"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  training:
-    build: ./mlops
-    container_name: training
-    volumes:
-      - ./data:/data
+  postgres:
+    image: postgres:13
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  airflow-init:
+    build:
+      context: ./mlops
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-init
     depends_on:
-      mlflow:
+      postgres:
         condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=sepsis_airflow_secret_key_123
     command: >
-      --data-dirs /data/Data-Set-A,/data/Data-Set-B --mlflow-uri http://mlflow:5001 --max-files 200
+      bash -c "
+        airflow db migrate &&
+        airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin
+      "
+
+  airflow-webserver:
+    build:
+      context: ./mlops
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=sepsis_airflow_secret_key_123
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./mlops:/opt/airflow/mlops
+      - ./data:/data
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  airflow-scheduler:
+    build:
+      context: ./mlops
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-scheduler
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+      hdfs-init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=sepsis_airflow_secret_key_123
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./mlops:/opt/airflow/mlops
+      - ./data:/data
+      - mlflow-artifacts:/mlflow/artifacts
+    command: scheduler
+    deploy:
+      resources:
+        limits:
+          cpus: '16.0'
+          memory: 8G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
 
   spark-master:
     build: ./spark
@@ -187,6 +311,7 @@ services:
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     volumes:
       - spark-checkpoints:/tmp/checkpoint
+      - mlflow-artifacts:/mlflow/artifacts
     depends_on:
       - spark-master
 
@@ -204,6 +329,7 @@ services:
       - spark-checkpoints:/tmp/checkpoint
       - ./spark/ivy2:/root/.ivy2
       - ./spark/app:/app
+      - mlflow-artifacts:/mlflow/artifacts
     depends_on:
       spark-master:
         condition: service_started
@@ -213,7 +339,9 @@ services:
         condition: service_healthy
       kafka-init:  
         condition: service_completed_successfully
-      training:
+      airflow-webserver:
+        condition: service_healthy
+      hdfs-init:
         condition: service_completed_successfully
     command:
       - /opt/spark/bin/spark-submit
@@ -228,7 +356,7 @@ services:
       - --conf
       - spark.cassandra.connection.host=cassandra
       - --conf
-      - spark.sql.streaming.checkpointLocation=${SPARK_CHECKPOINT_LOCATION:-/tmp/checkpoint/active}
+      - spark.sql.streaming.checkpointLocation=hdfs://namenode:9000/spark/checkpoints
       - /app/spark_stream.py
 
   api:
@@ -263,4 +391,4 @@ services:
 
 volumes:
   spark-checkpoints:
-  cassandra-data:
+  mlflow-artifacts:

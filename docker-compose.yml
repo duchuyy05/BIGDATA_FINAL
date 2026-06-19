@@ -220,7 +220,7 @@ services:
       dockerfile: Dockerfile.airflow
     container_name: airflow-webserver
     ports:
-      - "8080:8080"
+      - "8081:8080"
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -265,7 +265,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '16.0'
+          cpus: '4.0'
           memory: 8G
         reservations:
           cpus: '1.0'

@@ -1537,36 +1537,44 @@
                 });
         }
 
-        function buildTrueSepsisBands(labels, iculosValues) {
+        function buildStateBands(labels, warnings, iculosValues) {
             const bands = [];
+            let currentState = null;
             let bandStart = null;
             let previousHour = null;
 
             for (let i = 0; i < labels.length; i++) {
                 const hour = Number(iculosValues[i] ?? i + 1);
                 const isTrueSepsis = Number(labels[i]) === 1;
+                const isWarning = Number(warnings[i]) === 1;
 
-                if (isTrueSepsis && bandStart === null) {
+                let state = "green";
+                if (isTrueSepsis) state = "red";
+                else if (isWarning) state = "yellow";
+
+                if (state !== currentState) {
+                    if (currentState !== null && bandStart !== null) {
+                        bands.push({
+                            from: bandStart,
+                            to: hour - 0.5,
+                            color: currentState === "red" ? "rgba(220, 38, 38, 0.15)" : 
+                                   currentState === "yellow" ? "rgba(234, 179, 8, 0.15)" : 
+                                   "rgba(34, 197, 94, 0.10)"
+                        });
+                    }
                     bandStart = hour - 0.5;
+                    currentState = state;
                 }
-
-                if (!isTrueSepsis && bandStart !== null) {
-                    bands.push({
-                        from: bandStart,
-                        to: (previousHour ?? hour) + 0.5,
-                        color: "rgba(220, 38, 38, 0.10)"
-                    });
-                    bandStart = null;
-                }
-
                 previousHour = hour;
             }
 
-            if (bandStart !== null && previousHour !== null) {
+            if (currentState !== null && bandStart !== null && previousHour !== null) {
                 bands.push({
                     from: bandStart,
                     to: previousHour + 0.5,
-                    color: "rgba(220, 38, 38, 0.10)"
+                    color: currentState === "red" ? "rgba(220, 38, 38, 0.15)" : 
+                           currentState === "yellow" ? "rgba(234, 179, 8, 0.15)" : 
+                           "rgba(34, 197, 94, 0.10)"
                 });
             }
 
@@ -1596,18 +1604,18 @@
                     probabilityData.push([hour, prob]);
                 }
                 if (trueLabel) {
-                    actualSepsisData.push([hour, 1.06]);
+                    actualSepsisData.push([hour, 1.0]);
                 }
                 if (warn && !conf) {
-                    suspectedMarkers.push([hour, 0.08]);
+                    suspectedMarkers.push([hour, 0.02]);
                 }
                 if (conf) {
-                    confirmedMarkers.push([hour, 0.16]);
+                    confirmedMarkers.push([hour, 0.06]);
                 }
             }
 
             return {
-                trueSepsisBands: buildTrueSepsisBands(trueLabels, iculosValues),
+                trueSepsisBands: buildStateBands(trueLabels, warnings, iculosValues),
                 series: [
                     {
                         name: "Sepsis Probability",
@@ -1682,7 +1690,7 @@
                 xAxis: {
                     title: { text: "ICU Hour" },
                     type: "linear",
-                    min: 0,
+                    min: 0.5,
                     allowDecimals: false,
                     gridLineWidth: 1,
                     gridLineColor: "#e6eef1",
@@ -1729,7 +1737,7 @@
                 const sepsisChart = buildSepsisSeries(data, iculosValues);
                 chartConfig = baseChartConfig(sepsisChart.series, {
                     min: 0,
-                    max: 1.12,
+                    max: 1.0,
                     tickInterval: 0.25,
                     title: { text: "Probability" },
                     plotLines: [{

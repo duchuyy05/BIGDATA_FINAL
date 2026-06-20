@@ -191,6 +191,28 @@ Khi toàn bộ hệ thống đã hoạt động, bạn có thể truy cập các
    - 🟡 **Sepsis Warning (Cảnh báo sớm):** Bắt đầu phát hiện dấu hiệu bất thường, xác suất vượt ngưỡng dự đoán.
    - 🔴 **Sepsis Confirmed (Cảnh báo nguy cơ cao):** Trạng thái nguy hiểm đã kéo dài liên tục, yêu cầu bác sĩ can thiệp khẩn cấp.
 
+### 🖥️ Hình ảnh trực quan Giao diện Dashboard
+
+Hệ thống cung cấp giao diện Web Dashboard trực quan hóa với 7 tab tương ứng các nhóm chỉ số sinh tồn và kết quả dự đoán:
+
+#### 1. Giao diện theo dõi Dấu hiệu sinh tồn (Vitals & Blood Pressure)
+Hiển thị thời gian thực các chỉ số sinh tồn cơ bản bao gồm Nhịp tim (Heart Rate), Nồng độ Oxy máu (O2 Saturation), Huyết áp tâm thu/tâm trương/trung bình (SBP, DBP, MAP) dưới dạng đồ thị chuỗi thời gian liên tục.
+
+![Giao diện chính theo dõi dấu hiệu sinh tồn](Dashboard1.png)
+
+#### 2. Giao diện Cảnh báo Sepsis (Sepsis Alert Panel)
+Hiển thị xác suất dự đoán Sepsis (Sepsis Probability) được Spark Streaming + XGBoost chấm điểm thời gian thực. Đồ thị làm nổi bật đường ngưỡng tối ưu (Threshold = 0.53) và các vùng cảnh báo sớm (Warning - cam) và cảnh báo nguy cơ cao (Confirmed - đỏ) để bác sĩ nhanh chóng can thiệp.
+
+![Giao diện cảnh báo Sepsis thời gian thực](Dashboard7.png)
+
+#### 3. Các bảng kiểm tra cận lâm sàng và hóa sinh khác
+Người dùng có thể chuyển đổi linh hoạt giữa các tab bên trái để giám sát các chỉ số chuyên môn sâu hơn:
+- **Tab 02 (High Scale Laboratory Values):** AST, Glucose, Platelets, Fibrinogen... (Xem: `Dashboard2.png`)
+- **Tab 03 (Respiratory & Chemistry Panel):** Bicarbonate, Chloride, SaO2, PaCO2... (Xem: `Dashboard3.png`)
+- **Tab 04 (Temperature, Respiration & Blood Count):** Nhiệt độ cơ thể, Nhịp thở, Hemoglobin, WBC... (Xem: `Dashboard4.png`)
+- **Tab 05 (Blood Gas & Critical Markers):** Lactate, pH, Base Excess, Troponin I... (Xem: `Dashboard5.png`)
+- **Tab 06 (Renal, Liver & Electrolyte Panel):** Creatinine, Calcium, Potassium, Bilirubin... (Xem: `Dashboard6.png`)
+
 ---
 
 ## 🛑 Dừng & Reset Hệ thống

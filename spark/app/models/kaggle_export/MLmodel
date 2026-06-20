@@ -1,0 +1,17 @@
+artifact_path: model
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.xgboost
+    python_version: 3.11.0
+  xgboost:
+    code: null
+    data: model.json
+    format: json
+    model_class: xgboost.core.Booster
+    xgb_version: 2.0.3
+model_uuid: 5a8a4f9382b64b1592ef490e6761bc9d
+run_id: local_kaggle_export
+utc_time_created: '2024-06-18 00:00:00.000000'

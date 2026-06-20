@@ -2,6 +2,7 @@
 .venv/
 venv/
 .vscode
+.python-version
 __pycache__
 *.pyc
 *.pyo 
@@ -12,16 +13,3 @@ __pycache__
 *.bak
 *.tmp
 .env
-
-# Generated demo data
-data/active/
-data/sample/
-
-# Local Spark/Maven dependency cache
-spark/ivy2/
-
-# Locally exported trained models
-spark/app/models/kaggle_export/
-
-# Local Kaggle training notebook/script
-kaggle_train_sepsis_xgboost.py

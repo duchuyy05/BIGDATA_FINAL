@@ -3,10 +3,12 @@ import os
 import json
 from pathlib import Path
 from cassandra.cluster import Cluster
-import requests
 import pandas as pd
 from hdfs import InsecureClient
 import io
+import datetime
+import random
+import math
 
 app = Flask(__name__, template_folder='templates')
 
@@ -242,14 +244,12 @@ def query_patient():
                 df = pd.read_csv(local_path, sep='|')
                 # Fake event_time because live_data doesn't have it (just ICULOS)
                 # We can generate fake times based on ICULOS or just use current time
-                import datetime
                 base_time = datetime.datetime.now() - datetime.timedelta(hours=len(df))
                 df['event_time'] = [base_time + datetime.timedelta(hours=i) for i in range(len(df))]
         
         if df is not None and not df.empty:
             df = df.reset_index(drop=True)
             if 'SepsisProb' not in df.columns and 'SepsisLabel' in df.columns:
-                import random
                 df['SepsisProb'] = 0.1
                 df['SepsisWarning'] = 0
                 df['SepsisConfirmed'] = 0
@@ -287,8 +287,6 @@ def query_patient():
                         result[field].append(float(value))
     
     # Chuyển sang format yêu cầu
-    import math
-
     output = []
     for field in fields:
         datapoints = []

@@ -1,6 +1,7 @@
 import os
 import glob
 import json
+import random
 import numpy as np
 import pandas as pd
 import xgboost as xgb
@@ -8,7 +9,7 @@ import mlflow
 import mlflow.xgboost
 import argparse
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, auc, roc_auc_score, average_precision_score, accuracy_score, f1_score
+from sklearn.metrics import roc_curve, auc, average_precision_score
 from sklearn.model_selection import train_test_split
 from hdfs import InsecureClient
 
@@ -383,7 +384,6 @@ if __name__ == "__main__":
         
     print(f"Total files selected for training: {len(files_to_train)}")
     
-    import random
     random.seed(42)
     random.shuffle(files_to_train)
     print("Shuffled files_to_train to ensure uniform distribution across chunks.")
@@ -476,7 +476,6 @@ if __name__ == "__main__":
             else:
                 print("Evaluating current model on NEW global validation set to get baseline AUCPR...")
                 baseline_preds = final_model.predict(dval_global)
-                from sklearn.metrics import average_precision_score
                 # XGBoost doesn't return a single metric directly, compute AUCPR via sklearn
                 baseline_aucpr = average_precision_score(dval_global.get_label(), baseline_preds)
                 print(f"Baseline AUCPR before training this chunk: {baseline_aucpr:.4f}")

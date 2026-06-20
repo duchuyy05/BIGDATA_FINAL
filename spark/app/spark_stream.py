@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, from_json, current_timestamp
+from pyspark.sql.functions import col, from_json, current_timestamp, explode
 from pyspark.sql.types import *
 from pyspark.sql.streaming.state import GroupState, GroupStateTimeout
 from pyspark.sql import DataFrame
@@ -13,7 +13,6 @@ import mlflow
 import mlflow.xgboost
 import os
 from pathlib import Path
-from collections import deque
 from typing import Iterable, Tuple
 
 # 1. Load XGBoost model & stats
@@ -365,10 +364,6 @@ df = spark \
     .option("failOnDataLoss", "false") \
     .option("startingOffsets", "earliest") \
     .load()
-
-from pyspark.sql.types import ArrayType
-from pyspark.sql.functions import explode, from_json, col, current_timestamp
-from pyspark.sql.types import StringType
 
 # Create a shadow schema with all StringType to safely parse JSON from NiFi
 icu_schema_str = StructType([StructField(f.name, StringType(), True) for f in icu_schema.fields])

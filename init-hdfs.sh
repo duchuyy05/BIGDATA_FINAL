@@ -1,4 +1,6 @@
 #!/bin/bash
+set -e
+
 echo 'Waiting for namenode to leave safe mode...'
 hdfs dfsadmin -safemode wait
 
